@@ -1,0 +1,6 @@
+*.o
+*.d
+smid
+vendor/
+compile_commands.json
+*.log

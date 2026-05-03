@@ -1,0 +1,12 @@
+# Allow non-root smid access to the Silicon Motion USB display.
+#
+# The vendor autostart rule is intentionally separate and may remain disabled:
+#   /etc/udev/rules.d/99-smiusbdisplay.rules.disabled
+#
+# USB node needed by libusb reset/configure/claim/bulk/interrupt transfers.
+SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ATTR{idVendor}=="090c", ATTR{idProduct}=="0760", GROUP="plugdev", MODE="0660", TAG+="uaccess"
+
+# EVDI DRM card nodes needed by libevdi. System rules already tag these for
+# uaccess on an active local seat, but video-group ownership keeps CLI use
+# deterministic when seat ACLs are absent.
+SUBSYSTEM=="drm", KERNEL=="card*", SUBSYSTEMS=="platform", DRIVERS=="evdi", GROUP="video", MODE="0660", TAG+="uaccess"
