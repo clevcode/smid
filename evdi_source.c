@@ -69,6 +69,7 @@ struct smid_evdi_stream {
     int wake_pipe[2];
     struct evdi_event_context events;
     struct evdi_rect rects[SMID_EVDI_MAX_RECTS];
+    atomic_bool dpms_on;
     atomic_bool mode_seen;
     atomic_bool requested;
     int width;
@@ -105,6 +106,7 @@ struct smid_evdi_stream {
     int32_t pending_cursor_x;
     int32_t pending_cursor_y;
     atomic_uchar dirty_tiles;
+    atomic_uchar blank_tiles;
     atomic_uint_fast64_t stat_dirty;
 };
 
@@ -122,6 +124,7 @@ struct smid_evdi_source {
     pthread_t cursor_thread;
     bool cursor_thread_started;
     atomic_bool cursor_stop;
+    atomic_bool device_power_on;
     uint64_t damage_generation;
     int cursor_selected_stream;
     uint32_t cursor_selected_shape[SMID_EVDI_MAX_STREAMS];
@@ -151,6 +154,47 @@ static struct smid_usb *source_usb_locked(struct smid_evdi_source *src) {
     return usb;
 }
 
+static void make_device_power_packet(uint8_t packet[44], bool on) {
+    memset(packet, 0, 44);
+    memcpy(packet, SMID_MAGIC, 12);
+    smid_put32(packet + 12, 44);
+    smid_put32(packet + 16, 6);
+    packet[20] = 0x47;
+    packet[21] = on ? 1u : 0u;
+}
+
+static int submit_device_power(struct smid_evdi_source *src, bool on) {
+    struct smid_usb *usb = source_usb_locked(src);
+    if (!usb) {
+        return 0;
+    }
+    uint8_t packet[44];
+    make_device_power_packet(packet, on);
+    struct smid_tx_item item = {
+        .priority = SMID_TX_PRIO_CONTROL,
+        .endpoint = SMID_EP_BULK_OUT,
+        .xfer = SMID_USB_XFER_BULK,
+        .timeout_ms = 1000,
+        .data = packet,
+        .len = sizeof(packet),
+        .name = on ? "display-power-on" : "display-power-off",
+    };
+    return smid_transport_submit(&usb->tx, &item);
+}
+
+static void update_device_power(struct smid_evdi_source *src) {
+    bool any_on = false;
+    for (int i = 0; i < src->streams; i++) {
+        any_on = any_on ||
+                 atomic_load_explicit(&src->stream[i].dpms_on, memory_order_acquire);
+    }
+    bool old = atomic_exchange_explicit(&src->device_power_on, any_on,
+                                        memory_order_acq_rel);
+    if (old != any_on && submit_device_power(src, any_on)) {
+        smid_logf("evdi: display power %s enqueue failed\n", any_on ? "on" : "off");
+    }
+}
+
 void smid_evdi_source_set_usb(struct smid_evdi_source *src, struct smid_usb *usb) {
     if (!src) {
         return;
@@ -158,6 +202,10 @@ void smid_evdi_source_set_usb(struct smid_evdi_source *src, struct smid_usb *usb
     pthread_mutex_lock(&src->usb_lock);
     src->usb = usb;
     pthread_mutex_unlock(&src->usb_lock);
+    if (usb) {
+        atomic_store_explicit(&src->device_power_on, true, memory_order_release);
+        update_device_power(src);
+    }
     pthread_mutex_lock(&src->cursor_event_lock);
     pthread_cond_broadcast(&src->cursor_event_cond);
     pthread_mutex_unlock(&src->cursor_event_lock);
@@ -882,6 +930,10 @@ static int cursor_send_image(struct smid_evdi_stream *s, struct evdi_cursor_set 
 static void evdi_update_handler(int buffer_id, void *user_data) {
     struct smid_evdi_stream *s = user_data;
     (void)buffer_id;
+    if (!atomic_load_explicit(&s->dpms_on, memory_order_acquire)) {
+        atomic_store_explicit(&s->requested, false, memory_order_release);
+        return;
+    }
     int n = SMID_EVDI_MAX_RECTS;
     uint8_t dirty = 0;
     pthread_rwlock_wrlock(&s->buffer_lock);
@@ -895,6 +947,31 @@ static void evdi_update_handler(int buffer_id, void *user_data) {
         signal_damage(s->source);
     }
     atomic_store_explicit(&s->requested, false, memory_order_release);
+}
+
+static void evdi_dpms_handler(int dpms_mode, void *user_data) {
+    struct smid_evdi_stream *s = user_data;
+    bool on = dpms_mode == 0;
+    bool old = atomic_exchange_explicit(&s->dpms_on, on, memory_order_acq_rel);
+
+    if (on) {
+        atomic_store_explicit(&s->requested, false, memory_order_release);
+        atomic_store_explicit(&s->blank_tiles, 0, memory_order_release);
+        atomic_fetch_or_explicit(&s->dirty_tiles, 0x3, memory_order_release);
+        signal_damage(s->source);
+    } else {
+        atomic_store_explicit(&s->requested, false, memory_order_release);
+        atomic_store_explicit(&s->dirty_tiles, 0, memory_order_release);
+        if (old) {
+            atomic_store_explicit(&s->blank_tiles, 0x3, memory_order_release);
+            signal_damage(s->source);
+        }
+    }
+
+    if (old != on) {
+        smid_logf("evdi%d: dpms %s\n", s->index, on ? "on" : "off");
+        update_device_power(s->source);
+    }
 }
 
 static void evdi_cursor_set_handler(struct evdi_cursor_set cursor_set, void *user_data) {
@@ -1069,7 +1146,8 @@ static void *cursor_thread_main(void *arg) {
 
 static bool evdi_request_next(struct smid_evdi_stream *s) {
     bool can_request = false;
-    if (atomic_load_explicit(&s->mode_seen, memory_order_acquire)) {
+    if (atomic_load_explicit(&s->mode_seen, memory_order_acquire) &&
+        atomic_load_explicit(&s->dpms_on, memory_order_acquire)) {
         bool expected = false;
         can_request = atomic_compare_exchange_strong_explicit(
                 &s->requested, &expected, true, memory_order_acq_rel, memory_order_acquire);
@@ -1136,9 +1214,11 @@ static int stream_start(struct smid_evdi_source *src, struct smid_evdi_stream *s
     }
     s->buffer_lock_initialized = true;
     atomic_init(&s->stop, false);
+    atomic_init(&s->dpms_on, true);
     atomic_init(&s->mode_seen, false);
     atomic_init(&s->requested, false);
     atomic_init(&s->dirty_tiles, 0);
+    atomic_init(&s->blank_tiles, 0);
     cursor_init_stream(s);
 
     s->handle = evdi_open_attached_to(NULL);
@@ -1146,6 +1226,7 @@ static int stream_start(struct smid_evdi_source *src, struct smid_evdi_stream *s
         smid_logf("evdi%d: failed to open or add device\n", index);
         return -1;
     }
+    s->events.dpms_handler = evdi_dpms_handler;
     s->events.mode_changed_handler = evdi_mode_handler;
     s->events.update_ready_handler = evdi_update_handler;
     s->events.cursor_set_handler = evdi_cursor_set_handler;
@@ -1282,6 +1363,7 @@ int smid_evdi_source_start(struct smid_evdi_source **out, int streams, bool curs
         return -1;
     }
     atomic_init(&src->cursor_stop, false);
+    atomic_init(&src->device_power_on, true);
     for (int i = 0; i < streams; i++) {
         if (stream_start(src, &src->stream[i], i, cursor_events)) {
             smid_evdi_source_stop(src);
@@ -1433,10 +1515,27 @@ uint8_t smid_evdi_source_consume_dirty(struct smid_evdi_source *src) {
         return 0;
     }
     for (int i = 0; i < src->streams; i++) {
-        dirty |= (uint8_t)((atomic_exchange_explicit(&src->stream[i].dirty_tiles, 0,
-                                                     memory_order_acquire) & 0x3u) << (i * 2));
+        uint8_t stream_dirty = atomic_exchange_explicit(&src->stream[i].dirty_tiles, 0,
+                                                       memory_order_acquire) & 0x3u;
+        if (!atomic_load_explicit(&src->stream[i].dpms_on, memory_order_acquire)) {
+            stream_dirty = 0;
+        }
+        dirty |= (uint8_t)(stream_dirty << (i * 2));
     }
     return dirty;
+}
+
+uint8_t smid_evdi_source_consume_blank(struct smid_evdi_source *src) {
+    uint8_t blank = 0;
+    if (!src) {
+        return 0;
+    }
+    for (int i = 0; i < src->streams; i++) {
+        uint8_t stream_blank = atomic_exchange_explicit(&src->stream[i].blank_tiles, 0,
+                                                        memory_order_acquire) & 0x3u;
+        blank |= (uint8_t)(stream_blank << (i * 2));
+    }
+    return blank;
 }
 
 int smid_evdi_source_current_band_hashes(struct smid_evdi_source *src, int stream,

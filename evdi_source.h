@@ -27,6 +27,7 @@ void smid_evdi_source_stop(struct smid_evdi_source *src);
 void smid_evdi_source_set_usb(struct smid_evdi_source *src, struct smid_usb *usb);
 void smid_evdi_source_take_stats(struct smid_evdi_source *src, struct smid_evdi_stats *stats);
 uint8_t smid_evdi_source_consume_dirty(struct smid_evdi_source *src);
+uint8_t smid_evdi_source_consume_blank(struct smid_evdi_source *src);
 int smid_evdi_source_current_band_hashes(struct smid_evdi_source *src, int stream,
                                          struct smid_frame_hash hashes[2]);
 uint64_t smid_evdi_source_damage_snapshot(struct smid_evdi_source *src);
