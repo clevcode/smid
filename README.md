@@ -38,6 +38,15 @@ make clean
 make distclean
 ```
 
+To test the colour-conversion and JPEG pipeline independently of USB/EVDI, use
+the [standalone encoder probe](tools/VAAPI-PROBE.md). It builds the existing
+encoder against system VA-API/libjpeg-turbo libraries and checks synthetic
+images through both the upload and runtime memory-import paths:
+
+```sh
+bash tools/run-vaapi-probe.sh
+```
+
 ## Permissions
 
 Install local udev rules once:

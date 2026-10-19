@@ -144,23 +144,57 @@ BGRX USER_PTR import, and actual conversion/encoding untested. Debian 12's
 libusb version also needs checking: the current source uses
 `libusb_init_context()`, introduced after stock bookworm's 1.0.26.
 
+## Follow-up: VA-API capabilities and encoder probe (2026-10-19)
+
+The earlier missing-capability observations above describe the initial
+`system-info.txt`, not the latest state. Two subsequent files were inspected:
+
+- `~/Downloads/smid-followup.txt`, SHA-256
+  `d7692a2993d3fb769bec356723162d9111ea32b2a2aa6b400e05d38be62657a2`:
+  EVDI DKMS module for kernel 6.1.0-53-amd64; Intel render node `renderD128`;
+  i965 2.4.1+dfsg1-1, iHD 23.1.1+dfsg1-1, libva2 2.17.0-1 and libusb
+  1.0.26. The non-free package entries had no installed version. The separate
+  i965 capability test reported by Clayton also lacked VideoProc.
+- `~/Downloads/smid-vainfo-ihd.txt`, SHA-256
+  `8ea3b207365741c22ed82cd428baa487195d330011cc8583f42c47b9b37c7419`:
+  after the suggested non-free iHD package change, libva successfully loads
+  iHD 23.1.1 and advertises both `VAProfileNone / VAEntrypointVideoProc` and
+  `VAProfileJPEGBaseline / VAEntrypointEncPicture`. The missing advertised VPP
+  capability is resolved. Actual encoding on this Skylake host is still pending.
+
+The next test is the [standalone encoder probe](../../tools/VAAPI-PROBE.md),
+using the unchanged production `encoder.c` and synthetic input. It verifies
+copied BGRX upload and the runtime USER_PTR import path, 1920x1080 framebuffers,
+1920x544 crops at y=0/536, packed baseline 4:2:0 JPEGs and decoded patch colours.
+It rejects the encoder's automatic software fallback. No USB/EVDI code is linked.
+
+Local validation on Intel Raptor Lake-S UHD Graphics, iHD 24.1.0, libva 1.20.0,
+and system libjpeg-turbo 2.1.5:
+
+- CPU harness self-test: all 24 JPEGs passed; explicitly labelled CPU-only.
+- Actual iHD: all 24 JPEGs passed in both copy and USER_PTR region paths;
+  worst patch-channel error was 3/255 (diagnostic limit 12/255).
+- An intentionally missing VA driver failed with exit 1 and rejected fallback.
+- The source bundle extracted, built and ran independently with its supplied
+  runner; it produced an archive of logs, reference PPMs and all JPEGs.
+
+These are local encoder results, not acceptance on Clayton's HD 520, a test of
+the 0768 USB device, or a CPU/performance comparison. Production driver source
+is unchanged; PID/interface selection, the target-B ACK issue and initialization
+differences remain port work.
+
 ## Recommended next steps
 
-No additional USB capture is required for the initial feasibility assessment.
-Ask for the missing EVDI/package/render-node information and validate the exact
-VA-API encoder independently of USB ownership. Useful read-only commands:
+Send `build/vaapi-probe/smid-vaapi-probe.tar.gz` (built with
+`make -f tools/vaapi-probe.mk bundle`) and have Clayton run:
 
 ```sh
-/usr/sbin/modinfo evdi
-dpkg-query -W 'intel-media-va-driver*' 'i965-va-driver*' libva2 libusb-1.0-0
-ls -l /dev/dri/by-path/
+bash tools/run-vaapi-probe.sh
 ```
 
-Then run this against the Intel render node (substitute its path if different):
-
-```sh
-vainfo --display drm --device /dev/dri/renderD128
-```
+The complete instructions include Debian build dependencies. Request the result
+archive even on failure. The working vendor driver can remain running, and no
+additional USB capture is required at this stage.
 
 A controlled port should select the observed PID/interface, preserve the audio
 and HID interfaces, address permissions and Debian build compatibility, and

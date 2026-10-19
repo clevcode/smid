@@ -4,3 +4,4 @@ smid
 vendor/
 compile_commands.json
 *.log
+/build/
