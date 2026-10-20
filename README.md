@@ -6,6 +6,9 @@ Displays. One panel is usually driven by normal USB-C DisplayPort Alt Mode;
 `smid` drives the two USB-attached panels exposed by the adapter's `090c:0760`
 USB device.
 
+Experimental support for Wavlink `090c:0768` adapters is available with
+`--usb-pid 0768`. See [the 0768 build and run instructions](EXPERIMENTAL-0768.md).
+
 The driver creates EVDI virtual displays, captures their framebuffers, encodes
 the required JPEG bands, and sends the adapter protocol over USB. The default
 runtime path uses VA-API for hardware accelerated JPEG encoding, adaptive JPEG
@@ -31,6 +34,18 @@ The first build fetches a pinned libjpeg-turbo revision into
 `vendor/libjpeg-turbo` and builds a static `libturbojpeg.a` with SIMD enabled.
 That vendor checkout is a build artifact, not part of the release source.
 
+For distributions without libevdi development packages, an optional pinned
+userspace library can be built locally. This does not build or replace the EVDI
+kernel module. `libdrm` development headers are needed for the library:
+
+```sh
+make -j"$(nproc)" USE_SYSTEM_TURBOJPEG=1 USE_BUNDLED_EVDI=1
+```
+
+This option uses system libjpeg-turbo (including its development headers) and
+keeps the EVDI library under `vendor/evdi`. Run `make clean` before switching
+build configurations.
+
 Useful cleanup targets:
 
 ```sh
@@ -55,7 +70,7 @@ Install local udev rules once:
 sudo ./install-udev-rules.sh
 ```
 
-The rule grants access to the `090c:0760` USB device and EVDI DRM devices for an
+The rule grants access to the `090c:0760` and `090c:0768` USB devices and EVDI DRM devices for an
 active local seat. Log out and back in if the installer adds your user to a new
 group.
 
@@ -76,6 +91,8 @@ Common options:
 
 ```text
 --encoder cpu|direct-vaapi
+--usb-pid 0760|0768
+--no-retained-frames
 --jpeg-target-mib-s N
 --jpeg-quality N
 --jpeg-fixed-quality
@@ -86,6 +103,9 @@ Common options:
 Dirty detection uses the tested hash-bands path. The top and bottom bands are
 hashed independently, and unchanged bands can be represented by a small
 companion update when the adapter's retained-frame basis is known.
+`--no-retained-frames` sends both full JPEG bands for each changed display,
+while still skipping completely unchanged frames. Retained-frame updates are
+enabled by default for both supported PIDs.
 
 ## Notes
 

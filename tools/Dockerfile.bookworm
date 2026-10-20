@@ -1,0 +1,5 @@
+FROM debian:bookworm-slim
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential pkg-config libusb-1.0-0-dev libva-dev libdrm-dev libturbojpeg0-dev \
+    && rm -rf /var/lib/apt/lists/*
+WORKDIR /src

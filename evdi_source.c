@@ -1166,7 +1166,11 @@ static int stream_start(struct smid_evdi_source *src, struct smid_evdi_stream *s
 
     uint8_t edid[128];
     make_1080p_edid(edid, index);
+#ifdef SMID_EVDI_CONNECT2
     evdi_connect2(s->handle, edid, sizeof(edid),
+#else
+    evdi_connect(s->handle, edid, sizeof(edid),
+#endif
                   SMID_WIDTH * SMID_STREAM_H, SMID_WIDTH * SMID_STREAM_H * 60u);
     if (pthread_create(&s->thread, NULL, evdi_thread, s)) {
         smid_logf("evdi%d: thread create failed\n", index);

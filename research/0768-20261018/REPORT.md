@@ -2,8 +2,9 @@
 
 The submitted Wavlink adapter uses the same observed JPEG display protocol as
 smid's 090c:0760 device. This is strong evidence that a port can reuse the frame
-encoder and packet builder. It is not hardware acceptance: neither a modified
-smid nor the exact VA-API pipeline has been run on the tester's machine.
+encoder and packet builder. Clayton subsequently passed the exact VA-API
+pipeline on his HD 520 (see the October 20 follow-up below). Actual USB/desktop
+operation of the experimental smid build remains untested on his adapter.
 
 The first concrete device-selection change is interface **4**, alternate setting
 **1**, alongside PID **0768**. Interface 0 on this device is USB audio, so changing
@@ -183,28 +184,53 @@ the 0768 USB device, or a CPU/performance comparison. Production driver source
 is unchanged; PID/interface selection, the target-B ACK issue and initialization
 differences remain port work.
 
-## Recommended next steps
+## Follow-up: Clayton encoder acceptance and experimental driver (2026-10-20)
 
-Send `build/vaapi-probe/smid-vaapi-probe.tar.gz` (built with
-`make -f tools/vaapi-probe.mk bundle`) and have Clayton run:
+`~/Downloads/vaapi-probe-results.kT27Nd.tar.gz` has SHA-256
+`f84b81e6493d82f15defe54f65642fe70153c45037229d59954c280fde908386`.
+Its log matches the supplied encoder/probe source hashes and reports 24 passing
+JPEGs on Debian 12, libva API 1.17, libjpeg-turbo 2.1.5 and iHD. The Intel DRM
+node is `renderD128`. Independent Pillow decoding and patch-colour comparisons
+also pass all 24 images, with a worst channel error of 3/255. Reproduction:
 
 ```sh
-bash tools/run-vaapi-probe.sh
+python3 research/0768-20261018/verify_probe_results.py \
+  /home/je/Downloads/vaapi-probe-results.kT27Nd.tar.gz \
+  research/0768-20261018/generated/clayton-vaapi-verified.json
 ```
 
-The complete instructions include Debian build dependencies. Request the result
-archive even on failure. The working vendor driver can remain running, and no
-additional USB capture is required at this stage.
+The experimental full driver now provides:
 
-A controlled port should select the observed PID/interface, preserve the audio
-and HID interfaces, address permissions and Debian build compatibility, and
-validate initialization with one and then both displays. Begin with full-band
-JPEG updates; validate retained-frame/companion behavior separately on this
-firmware before depending on it. Compare CPU and VA-API using the same workload,
-quality, and delivered frame rate once display output works.
+- Explicit `--usb-pid 0768` selection of interface 4/alternate 1, after checking
+  the vendor-class interface and all three display endpoint types/addresses.
+  Configuration 1 is required. The 0768 path does not reset the composite USB
+  device, reissue SET_CONFIGURATION, or claim audio/HID interfaces. Failed
+  endpoint recovery exits rather than escalating to a whole-device reset.
+- Correct parsing of target A/B accepted-frame replies. Replaying the capture
+  against the actual C parser now accepts 174/174 A and 174/174 B replies,
+  including full 32-bit sequence values. All 820 frame/CNM-prefix checks pass.
+- Retained-frame behavior stays enabled by default. `--no-retained-frames`
+  disables companion updates: any changed display sends both full bands, and
+  completely unchanged frames are still skipped. Tests exercise all dirty-mask
+  combinations and the normal retained-companion path.
+- libusb 1.0.26-compatible initialization, optional system libjpeg-turbo and a
+  pinned upstream EVDI 1.14.2 userspace library. Debian 12 does not provide the
+  assumed libevdi development package in main; the bundle therefore includes
+  the library and its complete upstream source/license, without building or
+  replacing a kernel module. Older installed EVDI headers are also supported.
+- Debian 12 amd64 compilation with warnings as errors and passing runtime,
+  mocked USB descriptor/claim/release, CLI, and no-device smoke checks. The
+  container has no device passthrough; no physical USB acceptance is implied.
 
-The current investigation makes no runtime driver changes and performs no USB
-reset, claim, replay, service restart, or remote display test.
+## Next step
+
+Send `build/smid-0768-debian12-amd64.tar.gz` and the commands in
+[EXPERIMENTAL-0768.md](../../EXPERIMENTAL-0768.md). This contains a ready Debian 12
+amd64 executable and complete source. Run the actual driver after stopping the
+vendor service; do not request another standalone probe. Request the application
+log and whether both desktops/cursors work. Use `--no-retained-frames` only if
+needed. Restore the vendor service after the trial. Initialization still reuses
+the existing semantic sequence; the extra captured commands remain unexplained.
 
 ## Reproduction
 
