@@ -365,6 +365,7 @@ static void video_retained_note_plan(struct smid_video_retained_band retained[4]
 static int video_make_send_plan(struct smid_evdi_source *evdi, uint8_t dirty,
                                 uint8_t live_send_mask,
                                 struct smid_video_retained_band retained[4],
+                                bool retained_frames,
                                 struct smid_video_send_plan *plan) {
     memset(plan, 0, sizeof(*plan));
     dirty &= live_send_mask;
@@ -379,6 +380,10 @@ static int video_make_send_plan(struct smid_evdi_source *evdi, uint8_t dirty,
         uint8_t stream_mask = (uint8_t)(lower_bit | top_bit) & live_send_mask;
         uint8_t stream_dirty = dirty & stream_mask;
         if (!stream_dirty) {
+            continue;
+        }
+        if (!retained_frames) {
+            plan->send_mask |= stream_mask;
             continue;
         }
 
@@ -861,12 +866,17 @@ static int video_recover_usb_session(int rc,
             goto recovered;
         }
 
+        if (usb->product_id == 0x0768) {
+            smid_logf("0768 display reconnect failed; exiting without resetting audio/HID. Replug and retry.\n");
+            return light_rc;
+        }
         smid_logf("usb endpoint reconnect attempt=%u failed rc=%s; trying full reset\n",
-                attempt, libusb_error_name(light_rc));
+                    attempt, libusb_error_name(light_rc));
+        uint16_t product_id = usb->product_id;
         smid_heartbeat_stop(heartbeat);
         smid_usb_close(usb);
 
-        int full_rc = smid_usb_open(usb);
+        int full_rc = smid_usb_open(usb, product_id);
         if (!full_rc) {
             full_rc = smid_usb_start_io(usb);
         }
@@ -949,11 +959,13 @@ static bool video_sequence_wrapped(const uint32_t seq[2], uint8_t live_send_mask
 }
 
 static void usage(const char *argv0) {
-    fprintf(stderr, "usage: %s [--seconds N] [--fps N] [--ack-window N] [--jpeg-quality N] [--jpeg-fixed-quality] [--jpeg-target-mib-s N] [--encoder cpu|direct-vaapi] [--evdi-streams N]\n", argv0);
+    fprintf(stderr, "usage: %s [--usb-pid 0760|0768] [--no-retained-frames] [--seconds N] [--fps N] [--ack-window N] [--jpeg-quality N] [--jpeg-fixed-quality] [--jpeg-target-mib-s N] [--encoder cpu|direct-vaapi] [--evdi-streams N]\n", argv0);
 }
 
 int main(int argc, char **argv) {
     int evdi_streams = 2;
+    uint16_t usb_pid = SMID_USB_PID;
+    bool retained_frames = true;
     enum smid_encoder_backend encoder = SMID_ENCODER_DIRECT_VAAPI;
     int seconds = 0;
     int fps = 60;
@@ -962,7 +974,22 @@ int main(int argc, char **argv) {
     bool jpeg_fixed_quality = false;
     int jpeg_target_mib_s = SMID_QUALITY_TARGET_USB_MIB_S_DEFAULT;
     for (int i = 1; i < argc; i++) {
-        if (!strcmp(argv[i], "--evdi-streams") && i + 1 < argc) {
+        if (!strcmp(argv[i], "--help")) {
+            usage(argv[0]);
+            return 0;
+        } else if (!strcmp(argv[i], "--usb-pid") && i + 1 < argc) {
+            const char *pid = argv[++i];
+            if (!strcmp(pid, "0760"))
+                usb_pid = 0x0760;
+            else if (!strcmp(pid, "0768"))
+                usb_pid = 0x0768;
+            else {
+                usage(argv[0]);
+                return 2;
+            }
+        } else if (!strcmp(argv[i], "--no-retained-frames")) {
+            retained_frames = false;
+        } else if (!strcmp(argv[i], "--evdi-streams") && i + 1 < argc) {
             evdi_streams = atoi(argv[++i]);
             if (evdi_streams < 1) {
                 evdi_streams = 1;
@@ -1020,7 +1047,7 @@ int main(int argc, char **argv) {
 
     {
         struct smid_usb usb;
-        if (smid_usb_open(&usb)) {
+        if (smid_usb_open(&usb, usb_pid)) {
             smid_log_stop();
             return 1;
         }
@@ -1094,11 +1121,11 @@ int main(int argc, char **argv) {
                                           &ack_gate_bypassed,
                                           &ack_gate_bypass_ack);
             if (!rc) {
-                smid_logf("streaming evdi video %s at %dfps encoder=%s q-ceiling=%d q-floor=%d q-mode=%s q-target=%dMiB/s dirty-check=hash-bands cursor-events=1 ack-window=%d\n",
+                smid_logf("streaming evdi video %s at %dfps encoder=%s q-ceiling=%d q-floor=%d q-mode=%s q-target=%dMiB/s dirty-check=hash-bands cursor-events=1 ack-window=%d retained-frames=%s\n",
                         seconds > 0 ? "for requested duration" : "until interrupted", fps,
                         smid_encoder_backend_name(tiles[0].encoder.backend), jpeg_quality,
                         quality_ctl.floor, jpeg_fixed_quality ? "fixed" : "adaptive",
-                        jpeg_target_mib_s, ack_window);
+                        jpeg_target_mib_s, ack_window, retained_frames ? "on" : "off");
             }
             while (!rc && !stop_requested && (!end_us || smid_mono_us() < end_us)) {
                 dirty |= smid_evdi_source_consume_dirty(evdi);
@@ -1175,7 +1202,7 @@ int main(int argc, char **argv) {
                 uint64_t frame_start_us = smid_mono_us();
                 int frame_quality = quality_controller_current(&quality_ctl);
                 struct smid_video_send_plan plan;
-                rc = video_make_send_plan(evdi, dirty, live_send_mask, retained, &plan);
+                rc = video_make_send_plan(evdi, dirty, live_send_mask, retained, retained_frames, &plan);
                 uint8_t send_mask = plan.send_mask;
                 int build_slot = pipe_slot;
                 int submitted[4];
@@ -1246,7 +1273,7 @@ int main(int argc, char **argv) {
                     if (late_dirty || ack_uncertain) {
                         dirty |= late_dirty;
                         rc = video_make_send_plan(evdi, dirty, live_send_mask,
-                                                  retained, &plan);
+                                                  retained, retained_frames, &plan);
                         send_mask = plan.send_mask;
                         frame_start_us = smid_mono_us();
                         if (!rc) {

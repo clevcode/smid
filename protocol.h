@@ -29,6 +29,7 @@ struct smid_rawcmd {
 
 void smid_put32(uint8_t *p, uint32_t v);
 uint32_t smid_get32(const uint8_t *p);
+bool smid_parse_frame_ack(const uint8_t *packet, size_t len, int *stream, uint32_t *seq);
 void smid_make_semantic_init(struct smid_rawcmd c[SMID_RAWCMD_CAP], size_t *n);
 
 #endif

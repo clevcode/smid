@@ -47,10 +47,11 @@ static void reset_cooldown_mark(void) {
     }
 }
 
-static libusb_device_handle *open_wait(libusb_context *ctx, uint32_t timeout_ms) {
+static libusb_device_handle *open_wait(libusb_context *ctx, uint16_t product_id,
+                                      uint32_t timeout_ms) {
     uint64_t end = smid_mono_us() + (uint64_t)timeout_ms * 1000u;
     do {
-        libusb_device_handle *h = libusb_open_device_with_vid_pid(ctx, SMID_USB_VID, SMID_USB_PID);
+        libusb_device_handle *h = libusb_open_device_with_vid_pid(ctx, SMID_USB_VID, product_id);
         if (h) {
             return h;
         }
@@ -64,27 +65,76 @@ static void close_handle_only(struct smid_usb *u) {
         return;
     }
     if (u->iface_claimed) {
-        libusb_release_interface(u->handle, SMID_USB_IFACE);
+        libusb_release_interface(u->handle, u->interface_number);
         u->iface_claimed = false;
     }
     libusb_close(u->handle);
     u->handle = NULL;
 }
 
-static int configure_handle(struct smid_usb *u) {
-    libusb_set_auto_detach_kernel_driver(u->handle, 1);
-    int rc = libusb_set_configuration(u->handle, 1);
-    if (rc && rc != LIBUSB_ERROR_BUSY) {
-        smid_logf("set_configuration: %s\n", libusb_error_name(rc));
+static int validate_display_interface(struct smid_usb *u) {
+    struct libusb_config_descriptor *config = NULL;
+    int rc = libusb_get_config_descriptor_by_value(libusb_get_device(u->handle), 1, &config);
+    if (rc)
         return rc;
+    bool found = false;
+    for (int i = 0; i < config->bNumInterfaces; i++) {
+        const struct libusb_interface *iface = &config->interface[i];
+        for (int a = 0; a < iface->num_altsetting; a++) {
+            const struct libusb_interface_descriptor *alt = &iface->altsetting[a];
+            if (alt->bInterfaceNumber != u->interface_number ||
+                alt->bAlternateSetting != SMID_USB_ALTSETTING ||
+                alt->bInterfaceClass != LIBUSB_CLASS_VENDOR_SPEC)
+                continue;
+            unsigned endpoints = 0;
+            for (int e = 0; e < alt->bNumEndpoints; e++) {
+                const struct libusb_endpoint_descriptor *ep = &alt->endpoint[e];
+                int type = ep->bmAttributes & LIBUSB_TRANSFER_TYPE_MASK;
+                if (ep->bEndpointAddress == SMID_EP_BULK_OUT && type == LIBUSB_TRANSFER_TYPE_BULK)
+                    endpoints |= 1;
+                if (ep->bEndpointAddress == SMID_EP_INTR_OUT && type == LIBUSB_TRANSFER_TYPE_INTERRUPT)
+                    endpoints |= 2;
+                if (ep->bEndpointAddress == SMID_EP_INTR_IN && type == LIBUSB_TRANSFER_TYPE_INTERRUPT)
+                    endpoints |= 4;
+            }
+            found |= endpoints == 7;
+        }
     }
-    rc = libusb_claim_interface(u->handle, SMID_USB_IFACE);
+    libusb_free_config_descriptor(config);
+    if (!found)
+        smid_logf("USB %04x:%04x interface %d alt %d has unexpected display descriptors\n",
+                  SMID_USB_VID, u->product_id, u->interface_number, SMID_USB_ALTSETTING);
+    return found ? 0 : LIBUSB_ERROR_NOT_SUPPORTED;
+}
+
+static int configure_handle(struct smid_usb *u) {
+    int rc = validate_display_interface(u);
+    if (rc)
+        return rc;
+    libusb_set_auto_detach_kernel_driver(u->handle, 1);
+    int config = 0;
+    rc = libusb_get_configuration(u->handle, &config);
+    if (rc)
+        return rc;
+    if (config != 1) {
+        /* Never reset the 0768's audio/HID interfaces through SET_CONFIGURATION. */
+        if (u->product_id == 0x0768) {
+            smid_logf("USB 0768 configuration %d is not 1; reconnect the adapter\n", config);
+            return LIBUSB_ERROR_NOT_SUPPORTED;
+        }
+        rc = libusb_set_configuration(u->handle, 1);
+        if (rc) {
+            smid_logf("set_configuration: %s\n", libusb_error_name(rc));
+            return rc;
+        }
+    }
+    rc = libusb_claim_interface(u->handle, u->interface_number);
     if (rc) {
         smid_logf("claim_interface: %s\n", libusb_error_name(rc));
         return rc;
     }
     u->iface_claimed = true;
-    rc = libusb_set_interface_alt_setting(u->handle, SMID_USB_IFACE, SMID_USB_ALTSETTING);
+    rc = libusb_set_interface_alt_setting(u->handle, u->interface_number, SMID_USB_ALTSETTING);
     if (rc) {
         smid_logf("alt_setting: %s\n", libusb_error_name(rc));
         return rc;
@@ -118,7 +168,7 @@ static int clear_endpoint_halts(struct smid_usb *u) {
 
 static int open_configured_handle(struct smid_usb *u, uint32_t timeout_ms,
                                   bool clear_halts) {
-    u->handle = open_wait(u->ctx, timeout_ms);
+    u->handle = open_wait(u->ctx, u->product_id, timeout_ms);
     if (!u->handle) {
         return LIBUSB_ERROR_NO_DEVICE;
     }
@@ -137,21 +187,39 @@ static int open_configured_handle(struct smid_usb *u, uint32_t timeout_ms,
     return 0;
 }
 
-int smid_usb_open(struct smid_usb *u) {
+int smid_usb_open(struct smid_usb *u, uint16_t product_id) {
     memset(u, 0, sizeof(*u));
+    if (product_id != 0x0760 && product_id != 0x0768)
+        return -1;
+    u->product_id = product_id;
+    u->interface_number = product_id == 0x0768 ? 4 : SMID_USB_IFACE;
     pthread_mutex_init(&u->rx_lock, NULL);
     pthread_cond_init(&u->rx_cond, NULL);
     u->initialized = true;
 
-    int rc = libusb_init_context(&u->ctx, NULL, 0);
+    /* No init options are needed; this also supports Debian 12's libusb 1.0.26. */
+    int rc = libusb_init(&u->ctx);
     if (rc) {
         smid_logf("libusb_init: %s\n", libusb_error_name(rc));
         goto fail;
     }
-    u->handle = open_wait(u->ctx, 1000);
+    smid_logf("USB selecting %04x:%04x interface=%d alt=%d\n", SMID_USB_VID,
+              product_id, u->interface_number, SMID_USB_ALTSETTING);
+    if (product_id == 0x0768) {
+        /* This composite device also exposes audio/HID. Claim display only.
+         * A fresh plug while the vendor service is stopped gives a clean epoch. */
+        rc = open_configured_handle(u, 1000, true);
+        if (rc) {
+            smid_logf("open display interface: %s (check permissions/vendor service)\n",
+                      libusb_error_name(rc));
+            goto fail;
+        }
+        return 0;
+    }
+    u->handle = open_wait(u->ctx, product_id, 1000);
     if (!u->handle) {
         smid_logf("SMI USB display %04x:%04x not found or permission denied\n",
-                SMID_USB_VID, SMID_USB_PID);
+                SMID_USB_VID, product_id);
         goto fail;
     }
 
@@ -191,8 +259,9 @@ static void rx_publish(struct smid_usb *u, const uint8_t *b, int got) {
     pthread_mutex_lock(&u->rx_lock);
     u->rx_code_count[code]++;
     u->rx_code_status[code] = b[17];
-    if ((v & 0x00ffffffu) == 0x000001e9u) {
-        if (v & 0x00010000u) {
+    int ack_stream = 0;
+    if (smid_parse_frame_ack(b, (size_t)got, &ack_stream, &seq)) {
+        if (ack_stream) {
             atomic_store_explicit(&u->ack_b, seq, memory_order_release);
             atomic_fetch_add_explicit(&u->ack_b_generation, 1, memory_order_release);
             atomic_store_explicit(&u->ack_b_seen, true, memory_order_release);
@@ -287,7 +356,8 @@ void smid_usb_close(struct smid_usb *u) {
         libusb_exit(u->ctx);
         u->ctx = NULL;
     }
-    reset_cooldown_mark();
+    if (u->product_id == 0x0760)
+        reset_cooldown_mark();
     pthread_cond_destroy(&u->rx_cond);
     pthread_mutex_destroy(&u->rx_lock);
     memset(u, 0, sizeof(*u));

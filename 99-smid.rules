@@ -5,6 +5,7 @@
 #
 # USB node needed by libusb reset/configure/claim/bulk/interrupt transfers.
 SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ATTR{idVendor}=="090c", ATTR{idProduct}=="0760", GROUP="plugdev", MODE="0660", TAG+="uaccess"
+SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ATTR{idVendor}=="090c", ATTR{idProduct}=="0768", GROUP="plugdev", MODE="0660", TAG+="uaccess"
 
 # EVDI DRM card nodes needed by libevdi. System rules already tag these for
 # uaccess on an active local seat, but video-group ownership keeps CLI use

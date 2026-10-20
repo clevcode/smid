@@ -16,6 +16,18 @@ uint32_t smid_get32(const uint8_t *p) {
            ((uint32_t)p[3] << 24);
 }
 
+bool smid_parse_frame_ack(const uint8_t *packet, size_t len, int *stream, uint32_t *seq) {
+    if (!packet || len < 24 || memcmp(packet, SMID_MAGIC, 12))
+        return false;
+    uint32_t word = smid_get32(packet + 16);
+    /* Captured on both 0760 and 0768; bit 16 selects target B, not status. */
+    if (word != 0x010001e9u && word != 0x010101e9u)
+        return false;
+    *stream = (word & 0x00010000u) ? 1 : 0;
+    *seq = smid_get32(packet + 20);
+    return true;
+}
+
 static void init_packet(struct smid_rawcmd *c, const char *name, uint8_t ep, uint8_t xfer,
                         uint32_t wire_len, uint32_t payload_len, uint8_t selector,
                         uint8_t cmd, uint16_t arg, uint8_t wait_code) {

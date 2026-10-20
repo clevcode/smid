@@ -18,6 +18,7 @@ fi
 install -m 0644 "$RULE_SRC" "$RULE_DST"
 udevadm control --reload-rules
 udevadm trigger --subsystem-match=usb --attr-match=idVendor=090c --attr-match=idProduct=0760 --action=change || true
+udevadm trigger --subsystem-match=usb --attr-match=idVendor=090c --attr-match=idProduct=0768 --action=change || true
 udevadm trigger --subsystem-match=drm --action=change || true
 
 if [ -n "$USER_NAME" ]; then
@@ -32,7 +33,7 @@ for dev in /dev/bus/usb/*/*; do
   [ -e "$dev" ] || continue
   props=$(udevadm info -q property -n "$dev" 2>/dev/null || true)
   if grep -q '^ID_VENDOR_ID=090c$' <<<"$props" &&
-      grep -q '^ID_MODEL_ID=0760$' <<<"$props"; then
+      grep -Eq '^ID_MODEL_ID=076[08]$' <<<"$props"; then
     ls -l "$dev"
   fi
 done

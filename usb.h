@@ -15,6 +15,8 @@ struct smid_usb {
     libusb_context *ctx;
     libusb_device_handle *handle;
     bool iface_claimed;
+    uint16_t product_id;
+    int interface_number;
     struct smid_transport tx;
     pthread_t rx_thread;
     pthread_mutex_t rx_lock;
@@ -33,7 +35,7 @@ struct smid_usb {
     atomic_int rx_error;
 };
 
-int smid_usb_open(struct smid_usb *u);
+int smid_usb_open(struct smid_usb *u, uint16_t product_id);
 void smid_usb_close(struct smid_usb *u);
 int smid_usb_reconnect(struct smid_usb *u);
 int smid_usb_start_io(struct smid_usb *u);

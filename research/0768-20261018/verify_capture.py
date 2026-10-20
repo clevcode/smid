@@ -44,6 +44,8 @@ def main():
     lib.smid_frame_header_build.restype = None
     lib.smid_make_semantic_init.argtypes = [c.POINTER(Rawcmd), c.POINTER(c.c_size_t)]
     lib.smid_make_semantic_init.restype = None
+    lib.smid_parse_frame_ack.argtypes = [ptr, c.c_size_t, c.POINTER(c.c_int), c.POINTER(c.c_uint32)]
+    lib.smid_parse_frame_ack.restype = c.c_bool
     init = (Rawcmd * 96)()
     ninit = c.c_size_t()
     lib.smid_make_semantic_init(init, c.byref(ninit))
@@ -72,7 +74,12 @@ def main():
         if r["event"] == "C" and r["ep"] == 0x81 and b[16] == 0xe9:
             target = 1 if word & 0x10000 else 0
             stats[f"ack_target_{target}"] += 1
-            accepted = (word & 0x00ffffff) == 0x000001e9
+            stream, sequence = c.c_int(), c.c_uint32()
+            accepted = lib.smid_parse_frame_ack((c.c_uint8 * len(b)).from_buffer_copy(b),
+                                                len(b), c.byref(stream), c.byref(sequence))
+            if accepted:
+                assert stream.value == target
+                assert sequence.value == int.from_bytes(b[20:24], 'little')
             stats[f"current_rx_predicate_accepts_target_{target}"] += accepted
             if not accepted and len(ack_examples) < 4:
                 ack_examples.append({"record": r["record"], "word16": hex(word), "target": target})
