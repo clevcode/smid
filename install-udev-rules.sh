@@ -21,12 +21,16 @@ udevadm trigger --subsystem-match=usb --attr-match=idVendor=090c --attr-match=id
 udevadm trigger --subsystem-match=usb --attr-match=idVendor=090c --attr-match=idProduct=0768 --action=change || true
 udevadm trigger --subsystem-match=drm --action=change || true
 
+ACCESS_GROUPS=plugdev,video
+if getent group render >/dev/null; then
+  ACCESS_GROUPS+=,render
+fi
 if [ -n "$USER_NAME" ]; then
-  usermod -aG plugdev,video "$USER_NAME"
+  usermod -aG "$ACCESS_GROUPS" "$USER_NAME"
 fi
 
 echo "installed $RULE_DST"
-echo "added ${USER_NAME:-current user} to plugdev,video if available"
+echo "added ${USER_NAME:-current user} to $ACCESS_GROUPS"
 echo "log out and back in for group membership to affect new shells"
 echo "current matching nodes:"
 for dev in /dev/bus/usb/*/*; do

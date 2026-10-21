@@ -3,8 +3,8 @@
 The submitted Wavlink adapter uses the same observed JPEG display protocol as
 smid's 090c:0760 device. This is strong evidence that a port can reuse the frame
 encoder and packet builder. Clayton subsequently passed the exact VA-API
-pipeline on his HD 520 (see the October 20 follow-up below). Actual USB/desktop
-operation of the experimental smid build remains untested on his adapter.
+pipeline on his HD 520 and reported successful USB/desktop operation on October
+21 (see the follow-ups below). Longer-term stability remains under evaluation.
 
 The first concrete device-selection change is interface **4**, alternate setting
 **1**, alongside PID **0768**. Interface 0 on this device is USB audio, so changing
@@ -222,15 +222,57 @@ The experimental full driver now provides:
   mocked USB descriptor/claim/release, CLI, and no-device smoke checks. The
   container has no device passthrough; no physical USB acceptance is implied.
 
+## Follow-up: successful physical adapter test (2026-10-21)
+
+Clayton reports both 1920x1080@60 monitors, native cursors, window movement and
+normal desktop interaction work without stale/black regions or other observed
+artifacts. Retained-frame behavior remained enabled; he did not need the opt-out.
+The existing initialization sequence is sufficient for his tested handover from
+the vendor driver. A cold boot without the vendor driver having initialized the
+adapter, login-time startup, suspend/resume and long-term use are not yet proven.
+
+Inspected logs (copies retained under `evidence/`):
+
+| Input | SHA-256 |
+| --- | --- |
+| `~/Downloads/smid-0768.log` | `04753ff03faee3f58b4d329917911b904e751e83ce901599543291994781b358` |
+| `~/Downloads/smid-0768-long.log` | `90bf6c5c7dfb61e9d047d719e15b8f6096f4e120825bc545b4abbe8c1dbb73e4` |
+
+Both show interface 4/alternate 1, two 1920x1080@60 BGRX EVDI modes, four
+successful iHD initializations, `encoder=direct-vaapi` and `retained-frames=on`.
+Neither contains a reported error, timeout, recovery or software fallback. The
+`-long` log is the timed run and includes `smid: exiting` plus release of both
+EVDI cards. It confirms userspace EVDI 1.14.2 works with his kernel module
+1.14.16. The shorter file says `until interrupted` and ends at streaming startup;
+it does not establish shutdown or duration. Neither log includes timestamps or
+CPU samples; the filename is not duration evidence. The 60 Hz mode and 60 fps
+target do not measure delivered frame rate.
+
+CPU measurements are tester-reported, separate 120-second `pidstat` samples:
+
+| Process | Average CPU |
+| --- | --- |
+| Silicon Motion | 135.86% |
+| smid | 26.81% |
+
+`100 * (135.86 - 26.81) / 135.86 = 80.266%` lower sampled process CPU. These are
+uncontrolled workloads, not a standardized benchmark or a whole-system CPU
+comparison. With the supplied `pidstat` command (no `-I`), 100% represents one
+logical CPU. Clayton also reports about 1% for static USB displays.
+
+The vendor service was automatically reactivated after `systemctl stop`;
+`systemctl mask --runtime --now smiusbdisplay.service` resolved interface-busy
+errors. The supplied successful logs do not identify the reactivation trigger.
+The trial instructions now include runtime masking and matching unmask rollback.
+
 ## Next step
 
-Send `build/smid-0768-debian12-amd64.tar.gz` and the commands in
-[EXPERIMENTAL-0768.md](../../EXPERIMENTAL-0768.md). This contains a ready Debian 12
-amd64 executable and complete source. Run the actual driver after stopping the
-vendor service; do not request another standalone probe. Request the application
-log and whether both desktops/cursors work. Use `--no-retained-frames` only if
-needed. Restore the vendor service after the trial. Initialization still reuses
-the existing semantic sequence; the extra captured commands remain unexplained.
+Continue ordinary use of the already working build. The optional
+[GNOME user-service setup](../../tools/SYSTEMD.md) supplies login-time startup,
+USB/EVDI/render-node groups, boot-time EVDI devices, vendor masking and rollback.
+It is a configuration change, not a new encoder/USB probe. The existing binary
+archive remains unchanged. Service syntax can be checked locally; actual
+non-root startup and cold-boot behavior on Clayton's system remain to be verified.
 
 ## Reproduction
 

@@ -8,6 +8,8 @@ USB device.
 
 Experimental support for Wavlink `090c:0768` adapters is available with
 `--usb-pid 0768`. See [the 0768 build and run instructions](EXPERIMENTAL-0768.md).
+Clayton has confirmed dual 1080p output, native cursors and retained-frame
+updates on his Debian 12 / Intel HD 520 setup; longer-term validation continues.
 
 The driver creates EVDI virtual displays, captures their framebuffers, encodes
 the required JPEG bands, and sends the adapter protocol over USB. The default
@@ -70,13 +72,17 @@ Install local udev rules once:
 sudo ./install-udev-rules.sh
 ```
 
-The rule grants access to the `090c:0760` and `090c:0768` USB devices and EVDI DRM devices for an
-active local seat. Log out and back in if the installer adds your user to a new
-group.
+The rules grant access to the `090c:0760` and `090c:0768` USB devices and EVDI
+DRM devices. The installer adds your user to `plugdev`, `video`, and `render`
+(if present) for VA-API. Log out and back in after group changes.
 
-If you have already installed the vendor userspace helper, disable or uninstall
-that before running `smid`; both drivers cannot own the same USB device at the
-same time.
+If you have already installed the vendor userspace helper, mask its service
+before running `smid`; both drivers cannot own the same USB device at the same
+time. Keep its working EVDI kernel module installed.
+
+For GNOME login-time startup without running smid as root, see the
+[0768 user-service setup](tools/SYSTEMD.md). It also covers EVDI device creation
+at boot, masking a vendor service that reactivates itself, and rollback.
 
 ## Run
 

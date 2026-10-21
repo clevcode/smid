@@ -15,7 +15,7 @@ dest="$stage/smid-0768"
 mkdir -p "$dest/tools" "$dest/tests" "$dest/vendor/evdi"
 cp -- *.c *.h Makefile LICENSE README.md EXPERIMENTAL-0768.md \
     99-smid.rules install-udev-rules.sh "$dest/"
-cp tools/*.c tools/*.mk tools/*.md tools/*.sh tools/Dockerfile.bookworm "$dest/tools/"
+cp tools/*.c tools/*.mk tools/*.md tools/*.sh tools/*.service tools/Dockerfile.bookworm "$dest/tools/"
 cp tests/Makefile tests/runtime.c tests/usb_selection.c "$dest/tests/"
 git -C vendor/evdi archive "$ref" | tar -xf - -C "$dest/vendor/evdi"
 touch "$dest/vendor/evdi/.smid-source-$ref"

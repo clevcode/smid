@@ -1,0 +1,18 @@
+[Unit]
+Description=smid Wavlink 090c:0768 USB displays
+PartOf=graphical-session.target
+After=graphical-session-pre.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=exec
+Environment=LIBVA_DRIVER_NAME=iHD
+WorkingDirectory=%h/.local/opt/smid-0768
+ExecStart=%h/.local/opt/smid-0768/smid --usb-pid 0768
+Restart=on-failure
+RestartSec=20
+RestartPreventExitStatus=2
+TimeoutStopSec=30
+
+[Install]
+WantedBy=graphical-session.target

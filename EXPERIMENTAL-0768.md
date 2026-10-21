@@ -5,10 +5,11 @@ native cursor updates and dirty-frame skipping. It selects display interface
 4/alternate 1 for the 0768. Retained-frame companion updates remain enabled by
 default; `--no-retained-frames` disables them if they cause stale/black regions.
 
-Clayton's Intel HD 520 has passed the production encoder probe. The adapter's
-USB initialization and desktop output still need their first actual smid run.
-This build reuses the existing semantic initialization sequence; it does not
-guess the meaning of the extra vendor commands in the capture.
+Clayton's Intel HD 520 passed the production encoder probe and, on October 21,
+he confirmed both USB monitors, cursors and desktop interaction work correctly
+with retained frames enabled. The supplied logs show direct VA-API encoding and
+clean shutdown in the timed run. Long-term stability remains under evaluation.
+For automatic startup as a regular user, see [the service setup](tools/SYSTEMD.md).
 
 ## Run the supplied Debian 12 amd64 executable
 
@@ -35,13 +36,15 @@ Use the laptop panel or directly connected HDMI screen for the terminal. Stop
 the vendor service, then start smid (keep the adapter connected):
 
 ```sh
-sudo systemctl stop smiusbdisplay.service
+sudo systemctl mask --runtime --now smiusbdisplay.service
 sudo env LIBVA_DRIVER_NAME=iHD ./smid --usb-pid 0768 2>&1 | tee smid-0768.log
 ```
 
 The two USB displays may briefly go blank during the handover. If GNOME does
 not enable the new displays automatically, enable them in Display Settings.
 The process runs until Ctrl+C; `--seconds 120` can be added for a timed run.
+The runtime mask prevents the vendor service from automatically reclaiming the
+USB interface. It lasts until unmasked or the next reboot.
 
 If the picture has stale or black regions, stop smid and rerun with:
 
@@ -56,6 +59,7 @@ unchanged frames. There is no need to run another diagnostic probe first.
 After stopping smid, restore the vendor service:
 
 ```sh
+sudo systemctl unmask --runtime smiusbdisplay.service
 sudo systemctl start smiusbdisplay.service
 ```
 
