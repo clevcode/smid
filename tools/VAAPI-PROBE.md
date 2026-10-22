@@ -42,16 +42,25 @@ check the logged DRM paths before interpreting results.
 
 - Actual VA-API initialization, packed JPEG headers and hardware encoding. Any
   fallback to the CPU encoder is a failure in the default test.
-- BGRX upload, conversion to full-range BT.601 NV12, and baseline 4:2:0 JPEG.
+- Full-range BGRX upload, conversion to limited-range BT.601 NV12, and baseline
+  4:2:0 JPEG (Y=16..235, Cb/Cr=16..240).
 - The runtime `USER_PTR` import path with 4096-byte-aligned 1920x1080 buffers and
   7680-byte stride, cropped into 1920x544 bands at y=0 and y=536.
 - Two encoder instances, one per band; changing pixels at an unchanged source
   pointer, switching source buffers, and alternating JPEG quality 90/75.
 - Software decoding of all 24 images, checking dimensions, subsampling and
-  colourspace, and comparing patch interiors with the expected source pixels.
+  colourspace, and comparing raw Y/Cb/Cr patch interiors with an independent
+  limited-range BT.601 reference calculated from the source pixels.
   Per-channel mean absolute error must be at most 4 and maximum channel error
   at most 12 on the 0..255 scale. Patch edges are excluded because JPEG chroma
   subsampling blends colours there.
+
+Probe v2 checks encoded sample levels directly. Ordinary JPEG viewers assume
+full-range samples, so these device-targeted JPEGs will look lower-contrast in
+such a viewer. The reference PPMs contain the original full-range RGB. A direct
+visual comparison in a JPEG viewer does not test the adapter's range handling.
+The earlier v1 probe checked full-range JPEG-to-RGB output and could therefore
+pass without detecting a mismatch with the adapter's expected range.
 
 The copy path is diagnostic; the region path is the one used for full bands in
 smid. Both results are reported independently. A region failure matters even if

@@ -602,7 +602,8 @@ static int direct_vaapi_init(struct smid_direct_vaapi *enc, int width, int heigh
     vpp.output_color_standard = VAProcColorStandardBT601;
     vpp.filter_flags = VA_FILTER_SCALING_DEFAULT;
     vpp.input_color_properties.color_range = VA_SOURCE_RANGE_FULL;
-    vpp.output_color_properties.color_range = VA_SOURCE_RANGE_FULL;
+    /* Match the vendor's video-range YCbCr samples inside JPEGs. */
+    vpp.output_color_properties.color_range = VA_SOURCE_RANGE_REDUCED;
     vpp.output_color_properties.chroma_sample_location =
         VA_CHROMA_SITING_VERTICAL_CENTER | VA_CHROMA_SITING_HORIZONTAL_CENTER;
     vpp.processing_mode = VAProcPerformanceMode;
@@ -879,7 +880,7 @@ static int direct_vaapi_vpp_region(struct smid_direct_vaapi *enc,
     vpp.output_color_standard = VAProcColorStandardBT601;
     vpp.filter_flags = VA_FILTER_SCALING_DEFAULT;
     vpp.input_color_properties.color_range = VA_SOURCE_RANGE_FULL;
-    vpp.output_color_properties.color_range = VA_SOURCE_RANGE_FULL;
+    vpp.output_color_properties.color_range = VA_SOURCE_RANGE_REDUCED;
     vpp.output_color_properties.chroma_sample_location =
         VA_CHROMA_SITING_VERTICAL_CENTER | VA_CHROMA_SITING_HORIZONTAL_CENTER;
     vpp.processing_mode = VAProcPerformanceMode;
@@ -1026,6 +1027,65 @@ static int direct_vaapi_encode_bgrx_writer_into(struct smid_direct_vaapi *enc,
     return direct_vaapi_encode_uploaded_bgrx(enc, quality, jpeg_out, jpeg_cap, jpeg_len_out);
 }
 
+static int cpu_reserve_yuv(struct smid_encoder *enc, int width, int height) {
+    unsigned long bytes = tjBufSizeYUV2(width, 1, height, TJSAMP_420);
+    if (bytes == (unsigned long)-1) {
+        return -1;
+    }
+    if (bytes > enc->cpu_yuv_cap) {
+        uint8_t *buffer = realloc(enc->cpu_yuv, bytes);
+        if (!buffer) {
+            return -1;
+        }
+        enc->cpu_yuv = buffer;
+        enc->cpu_yuv_cap = bytes;
+    }
+    return 0;
+}
+
+/* Keep libjpeg-turbo's SIMD RGB conversion and subsampling, then scale the
+ * planes before compression. Match the vendor's limited-range BT.601 samples:
+ * Y=16..235, Cb/Cr=16..240 with neutral chroma at 128. Scaling RGB instead would
+ * apply the wrong chroma gain. The buffer is allocated at encoder startup and
+ * reused; only an explicitly larger variable-size request can grow it. */
+static int cpu_encode_packed(struct smid_encoder *enc, const uint8_t *pixels,
+                             int width, int pitch, int height, int pixel_format,
+                             int quality, uint8_t *jpeg_out, unsigned long jpeg_cap,
+                             unsigned long *jpeg_len_out) {
+    if (cpu_reserve_yuv(enc, width, height)) {
+        smid_logf("cpu YCbCr buffer allocation failed for %dx%d\n", width, height);
+        return -1;
+    }
+    if (tjEncodeYUV3(enc->tj, pixels, width, pitch, height, pixel_format,
+                     enc->cpu_yuv, 1, TJSAMP_420, 0)) {
+        smid_logf("cpu YCbCr conversion failed: %s\n", tjGetErrorStr2(enc->tj));
+        return -1;
+    }
+    unsigned long y_bytes = tjPlaneSizeYUV(0, width, 0, height, TJSAMP_420);
+    unsigned long bytes = tjBufSizeYUV2(width, 1, height, TJSAMP_420);
+    for (unsigned long i = 0; i < y_bytes; i++) {
+        enc->cpu_yuv[i] = (uint8_t)(16 + (enc->cpu_yuv[i] * 219 + 127) / 255);
+    }
+    for (unsigned long i = y_bytes; i < bytes; i++) {
+        int centered = (int)enc->cpu_yuv[i] - 128;
+        enc->cpu_yuv[i] = (uint8_t)((centered * 224 + 128 * 255 + 127) / 255);
+    }
+    uint8_t *jpeg_ptr = jpeg_out;
+    *jpeg_len_out = jpeg_cap;
+    if (tjCompressFromYUV(enc->tj, enc->cpu_yuv, width, 1, height, TJSAMP_420,
+                          &jpeg_ptr, jpeg_len_out, clamp_jpeg_quality(quality),
+                          TJFLAG_FASTDCT | TJFLAG_NOREALLOC)) {
+        smid_logf("cpu limited-range jpeg %dx%d failed: %s\n",
+                  width, height, tjGetErrorStr2(enc->tj));
+        return -1;
+    }
+    if (jpeg_ptr != jpeg_out) {
+        smid_logf("cpu jpeg reallocated unexpectedly\n");
+        return -1;
+    }
+    return 0;
+}
+
 static int encoder_init_cpu(struct smid_encoder *enc, int width, int height) {
     enc->backend = SMID_ENCODER_CPU;
     enc->width = width;
@@ -1034,6 +1094,11 @@ static int encoder_init_cpu(struct smid_encoder *enc, int width, int height) {
     enc->tj = tjInitCompress();
     if (!enc->tj) {
         smid_logf("cpu jpeg init failed\n");
+        return -1;
+    }
+    if (cpu_reserve_yuv(enc, width, height)) {
+        smid_logf("cpu YCbCr buffer allocation failed\n");
+        smid_encoder_destroy(enc);
         return -1;
     }
     return 0;
@@ -1121,20 +1186,8 @@ int smid_encoder_encode_bgrx_region(struct smid_encoder *enc, const uint8_t *bgr
     }
 
     const uint8_t *region = bgrx + (size_t)y * (size_t)src_stride + (size_t)x * 4u;
-    uint8_t *jpeg_ptr = jpeg_out;
-    *jpeg_len_out = jpeg_cap;
-    if (tjCompress2(enc->tj, region, width, src_stride, height, TJPF_BGRX,
-                    &jpeg_ptr, jpeg_len_out, TJSAMP_420, quality,
-                    TJFLAG_FASTDCT | TJFLAG_NOREALLOC)) {
-        smid_logf("cpu bgrx region jpeg %dx%d failed: %s\n",
-                  width, height, tjGetErrorStr2(enc->tj));
-        return -1;
-    }
-    if (jpeg_ptr != jpeg_out) {
-        smid_logf("cpu bgrx region jpeg reallocated unexpectedly\n");
-        return -1;
-    }
-    return 0;
+    return cpu_encode_packed(enc, region, width, src_stride, height, TJPF_BGRX,
+                             quality, jpeg_out, jpeg_cap, jpeg_len_out);
 }
 
 int smid_encoder_init(struct smid_encoder *enc, enum smid_encoder_backend backend) {
@@ -1148,6 +1201,7 @@ void smid_encoder_destroy(struct smid_encoder *enc) {
     if (enc->tj) {
         tjDestroy(enc->tj);
     }
+    free(enc->cpu_yuv);
     if (enc->direct) {
         direct_vaapi_destroy(enc->direct);
         free(enc->direct);
@@ -1165,19 +1219,8 @@ int smid_encoder_encode_rgb(struct smid_encoder *enc, const uint8_t *rgb,
                                             jpeg_out, jpeg_cap, jpeg_len_out);
     }
 
-    uint8_t *jpeg_ptr = jpeg_out;
-    *jpeg_len_out = jpeg_cap;
-    if (tjCompress2(enc->tj, rgb, enc->width, 0, enc->height, TJPF_RGB,
-                    &jpeg_ptr, jpeg_len_out, TJSAMP_420, quality,
-                    TJFLAG_FASTDCT | TJFLAG_NOREALLOC)) {
-        smid_logf("cpu jpeg failed: %s\n", tjGetErrorStr2(enc->tj));
-        return -1;
-    }
-    if (jpeg_ptr != jpeg_out) {
-        smid_logf("cpu jpeg reallocated unexpectedly\n");
-        return -1;
-    }
-    return 0;
+    return cpu_encode_packed(enc, rgb, enc->width, 0, enc->height, TJPF_RGB,
+                             quality, jpeg_out, jpeg_cap, jpeg_len_out);
 }
 
 int smid_encoder_encode_rgb_size(struct smid_encoder *enc, const uint8_t *rgb,
@@ -1196,19 +1239,8 @@ int smid_encoder_encode_rgb_size(struct smid_encoder *enc, const uint8_t *rgb,
         return -1;
     }
 
-    uint8_t *jpeg_ptr = jpeg_out;
-    *jpeg_len_out = jpeg_cap;
-    if (tjCompress2(enc->tj, rgb, width, 0, height, TJPF_RGB,
-                    &jpeg_ptr, jpeg_len_out, TJSAMP_420, quality,
-                    TJFLAG_FASTDCT | TJFLAG_NOREALLOC)) {
-        smid_logf("cpu jpeg %dx%d failed: %s\n", width, height, tjGetErrorStr2(enc->tj));
-        return -1;
-    }
-    if (jpeg_ptr != jpeg_out) {
-        smid_logf("cpu jpeg reallocated unexpectedly\n");
-        return -1;
-    }
-    return 0;
+    return cpu_encode_packed(enc, rgb, width, 0, height, TJPF_RGB,
+                             quality, jpeg_out, jpeg_cap, jpeg_len_out);
 }
 
 int smid_encoder_encode_bgrx(struct smid_encoder *enc, const uint8_t *bgrx,
@@ -1222,19 +1254,8 @@ int smid_encoder_encode_bgrx(struct smid_encoder *enc, const uint8_t *bgrx,
                                              jpeg_cap, jpeg_len_out);
     }
 
-    uint8_t *jpeg_ptr = jpeg_out;
-    *jpeg_len_out = jpeg_cap;
-    if (tjCompress2(enc->tj, bgrx, enc->width, 0, enc->height, TJPF_BGRX,
-                    &jpeg_ptr, jpeg_len_out, TJSAMP_420, quality,
-                    TJFLAG_FASTDCT | TJFLAG_NOREALLOC)) {
-        smid_logf("cpu bgrx jpeg failed: %s\n", tjGetErrorStr2(enc->tj));
-        return -1;
-    }
-    if (jpeg_ptr != jpeg_out) {
-        smid_logf("cpu bgrx jpeg reallocated unexpectedly\n");
-        return -1;
-    }
-    return 0;
+    return cpu_encode_packed(enc, bgrx, enc->width, 0, enc->height, TJPF_BGRX,
+                             quality, jpeg_out, jpeg_cap, jpeg_len_out);
 }
 
 int smid_encoder_encode_bgrx_size(struct smid_encoder *enc, const uint8_t *bgrx,
@@ -1253,18 +1274,6 @@ int smid_encoder_encode_bgrx_size(struct smid_encoder *enc, const uint8_t *bgrx,
         return -1;
     }
 
-    uint8_t *jpeg_ptr = jpeg_out;
-    *jpeg_len_out = jpeg_cap;
-    if (tjCompress2(enc->tj, bgrx, width, 0, height, TJPF_BGRX,
-                    &jpeg_ptr, jpeg_len_out, TJSAMP_420, quality,
-                    TJFLAG_FASTDCT | TJFLAG_NOREALLOC)) {
-        smid_logf("cpu bgrx jpeg %dx%d failed: %s\n",
-                  width, height, tjGetErrorStr2(enc->tj));
-        return -1;
-    }
-    if (jpeg_ptr != jpeg_out) {
-        smid_logf("cpu bgrx jpeg reallocated unexpectedly\n");
-        return -1;
-    }
-    return 0;
+    return cpu_encode_packed(enc, bgrx, width, 0, height, TJPF_BGRX,
+                             quality, jpeg_out, jpeg_cap, jpeg_len_out);
 }

@@ -1121,7 +1121,7 @@ int main(int argc, char **argv) {
                                           &ack_gate_bypassed,
                                           &ack_gate_bypass_ack);
             if (!rc) {
-                smid_logf("streaming evdi video %s at %dfps encoder=%s q-ceiling=%d q-floor=%d q-mode=%s q-target=%dMiB/s dirty-check=hash-bands cursor-events=1 ack-window=%d retained-frames=%s\n",
+                smid_logf("streaming evdi video %s at %dfps encoder=%s q-ceiling=%d q-floor=%d q-mode=%s q-target=%dMiB/s dirty-check=hash-bands cursor-events=1 ack-window=%d retained-frames=%s color-range=limited\n",
                         seconds > 0 ? "for requested duration" : "until interrupted", fps,
                         smid_encoder_backend_name(tiles[0].encoder.backend), jpeg_quality,
                         quality_ctl.floor, jpeg_fixed_quality ? "fixed" : "adaptive",

@@ -1,16 +1,17 @@
 # Light-grey loss and adaptive quality audit, 2026-10-22
 
-Source inspected: `311cc40`. Clayton reports light-grey borders disappearing
+Initial source inspected: `311cc40`. Clayton reports light-grey borders disappearing
 against white with smid, consistently across three monitors, while the vendor
 driver preserves them. Fixed Q98 and the CPU encoder reportedly do not resolve
 it. The previously prepared user-service reply/archive has not been sent.
 
 ## Strongest lead: encoded colour range differs
 
-The production VA-API path explicitly uses full-range sRGB input and full-range
-BT.601 NV12 output in both its copy and USER_PTR conversion paths (`encoder.c`,
-around lines 599 and 876). The CPU path uses standard libjpeg-turbo BGRX-to-JPEG
-encoding, also producing full-range values in the tests below.
+Before the correction below, the VA-API path explicitly used full-range sRGB
+input and full-range BT.601 NV12 output in both its copy and USER_PTR conversion
+paths (`encoder.c`, around lines 599 and 876). The CPU path used standard
+libjpeg-turbo BGRX-to-JPEG
+encoding, also producing full-range values in the baseline tests below.
 
 Reanalysis of Clayton's original vendor-driver capture included all 820 JPEGs,
 sampling every eighth pixel horizontally and vertically. Neutral means decoded
@@ -38,9 +39,9 @@ provides independent corroboration. The binary's
 
 The luma coefficients sum to 56294/65536, approximately 219/255, with a +16
 offset. This is a modified limited-range RGB-to-YCbCr converter, not the ordinary
-full-range conversion smid uses. This is the vendor binary on pony, not a binary
-collected from Clayton; his actual capture independently shows matching range
-characteristics. Disassembly is saved locally under `generated/`.
+full-range conversion smid previously used. This is the vendor binary on pony,
+not a binary collected from Clayton; his actual capture independently shows
+matching range characteristics. Disassembly is saved locally under `generated/`.
 
 If the adapter interprets incoming luma as limited range, full-range values from
 smid would be expanded as `(Y - 16) * 255 / 219`, then clipped. Thus distinct
@@ -55,9 +56,10 @@ A correction must handle luma and chroma correctly, including CPU-generated
 companion rectangles; merely changing JPEG quality or scaling all three RGB
 channels is not an equivalent colour conversion.
 
-## Local production-encoder test
+## Original full-range production-encoder test
 
-`levels.c` links the current production encoder and logger only. It encodes
+`levels.c` links the production encoder and logger only. These baseline results
+used the original full-range encoder. It encodes
 synthetic BGRX flat greys and one-pixel grey borders on white through the actual
 region API, both 1920x544 bands at y=0 and y=536, using CPU and iHD at Q70/Q98/Q100.
 It rejects backend fallback. Pillow independently decodes the resulting JPEGs.
@@ -112,6 +114,13 @@ session losing near-white detail.
 
 ## Reproduce offline
 
+These commands encode the currently checked-out source. Use revision `f581fd5`
+to reproduce the full-range baseline above. With the limited-range correction,
+the ordinary JPEG-to-RGB errors reported by `check_levels.py` are not acceptance
+criteria: that decoder assumes full-range samples. Use the raw-sample tests in
+the follow-up below to validate limited range. Preserve earlier generated files
+when comparing revisions.
+
 ```sh
 mkdir -p research/quality-20261022/generated
 cc -O2 -Wall -Wextra -Werror -std=c11 -D_GNU_SOURCE -iquote . \
@@ -132,4 +141,69 @@ python3 research/quality-20261022/capture_levels.py \
 
 The Python checks require Pillow and NumPy. The original capture has SHA-256
 `da72155f87094c4d6d723745a7379338af3c0557e199c8c344dd99d17b3cdc31`.
-Production source, the driver archive and the user-service archive are unchanged.
+At the end of the initial audit, production source, the driver archive and the
+user-service archive were unchanged.
+
+## Limited-range correction and local validation
+
+The follow-up changes both VA-API VPP paths to reduced-range BT.601 output while
+keeping full-range RGB input. CPU encoding first uses libjpeg-turbo's RGB-to-YUV
+conversion/subsampling, then scales Y to 16..235 and Cb/Cr to 16..240 around 128
+before compressing those planes. The CPU scratch buffer is allocated at startup
+and reused; only a larger variable-size request grows it. This covers the small
+CPU companion rectangles as well as full-band CPU fallback. The extra integer
+rounding is covered by the decoded-sample tolerances below.
+
+The streaming log now includes `color-range=limited`. Both PIDs use this default;
+there is no new range flag. JPEG quality control and retained-frame scheduling
+are unchanged, including the separate idle-repaint limitation described above.
+
+Validation uses the actual production encoder, with independent BT.601 expected
+samples and raw Y/Cb/Cr JPEG decoding rather than a full-range RGB viewer:
+
+- `tests/encoder_range.c`: 34 JPEGs pass with CPU full bands and another 34 with
+  strict hardware full bands. The suite covers BGRX, RGB, writer and cropped
+  region APIs at Q98/Q70/Q100/Q98, black/white endpoints, saturated colours,
+  near-white one-pixel borders, sixteen 32x32 CPU companions and odd-sized CPU
+  requests. For patch interiors, tolerances are two code values at Q98/Q100 and
+  four at Q70; black/white endpoints must stay within one. Near-white borders
+  through RGB 252 must still differ from white at high quality. Hardware mode
+  rejects CPU fallback.
+- The updated standalone v2 probe passes all 24 hardware JPEGs across copy and
+  USER_PTR paths with maximum patch sample error of one. Its CPU self-test also
+  passes 24 JPEGs. A deliberately missing VA driver correctly fails both paths
+  rather than reporting CPU fallback as a hardware pass.
+- CPU encoder tests pass AddressSanitizer and UndefinedBehaviorSanitizer,
+  including the new plane buffer's growth, odd dimensions and destruction.
+- The existing retained-frame/ACK and USB-selection tests pass. The complete
+  executable builds locally with warnings treated as errors using system
+  libjpeg-turbo and bundled userspace EVDI.
+
+Local hardware is Intel Raptor Lake-S UHD Graphics (8086:a788), iHD 24.1.0 and
+libva 2.20.0, not Clayton's Skylake. Hardware fixtures use production geometry:
+1920x544 bands, and 1920x1080 USER_PTR sources at stride 7680 with crop y=536.
+An initial artificial 512x64 GPU fixture produced a small range offset (white
+237 rather than 235); an artificial 1952-wide USER_PTR fixture failed allocation.
+Those failed attempts remain in the local build logs. The production-size tests
+pass without relaxing tolerances. This does not validate arbitrary VA-API surface
+sizes; the runtime uses CPU encoding for 32x32 companions.
+
+Commands for the added regression checks:
+
+```sh
+make -f tests/Makefile
+LIBVA_DRIVER_NAME=iHD build/tests/encoder-range --vaapi
+make -f tools/vaapi-probe.mk
+build/vaapi-probe/smid-vaapi-probe --cpu-self-test build/probe-limited-cpu
+LIBVA_DRIVER_NAME=iHD build/vaapi-probe/smid-vaapi-probe build/probe-limited-vaapi
+```
+
+Local logs are retained in `build/limited-range-tests-final.log`,
+`build/limited-range-gpu-final.log`, `build/limited-range-sanitized.log`,
+`build/probe-limited-{cpu,vaapi,negative}.log` and
+`build/limited-range-driver-build.log`. No USB device or live display service
+was touched for these checks. Physical highlight visibility, sustained CPU cost
+and the corrected Skylake VPP output remain to be confirmed on Clayton's setup.
+The Debian 12 update is packaged separately as
+`build/smid-0768-limited-range-debian12-amd64.tar.gz`, preserving the earlier
+working driver and user-service archives for rollback.

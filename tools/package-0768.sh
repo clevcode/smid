@@ -11,12 +11,12 @@ ref=9905b9bfed8b7e49befa0530bfb6e464380d938f
 test "$(git -C vendor/evdi rev-parse HEAD)" = "$ref"
 mkdir -p build
 stage=$(mktemp -d "$repo/build/0768-package.XXXXXX")
-dest="$stage/smid-0768"
+dest="$stage/smid-0768-limited-range"
 mkdir -p "$dest/tools" "$dest/tests" "$dest/vendor/evdi"
 cp -- *.c *.h Makefile LICENSE README.md EXPERIMENTAL-0768.md \
     99-smid.rules install-udev-rules.sh "$dest/"
 cp tools/*.c tools/*.mk tools/*.md tools/*.sh tools/*.service tools/Dockerfile.bookworm "$dest/tools/"
-cp tests/Makefile tests/runtime.c tests/usb_selection.c "$dest/tests/"
+cp tests/Makefile tests/runtime.c tests/usb_selection.c tests/encoder_range.c "$dest/tests/"
 git -C vendor/evdi archive "$ref" | tar -xf - -C "$dest/vendor/evdi"
 touch "$dest/vendor/evdi/.smid-source-$ref"
 {
@@ -24,6 +24,7 @@ touch "$dest/vendor/evdi/.smid-source-$ref"
     git rev-parse HEAD
     printf 'EVDI source revision: %s (upstream 1.14.2, LGPL-2.1 library)\n' "$ref"
     printf 'Build: Debian 12 amd64; system libusb, VA-API and libjpeg-turbo.\n'
+    printf 'JPEG samples: limited-range BT.601 (Y 16..235, Cb/Cr 16..240).\n'
     printf 'Physical 090c:0768 operation remains experimental.\n'
 } > "$dest/BUILD-INFO.txt"
 docker build -f tools/Dockerfile.bookworm -t smid-bookworm-builder:local .
@@ -47,7 +48,7 @@ rm -rf "$dest/build"
     cd "$dest"
     sha256sum -- *.c *.h Makefile smid vendor/evdi/library/libevdi.so.1.14.2 > SHA256SUMS
 )
-archive="$repo/build/smid-0768-debian12-amd64.tar.gz"
-tar -czf "$archive" -C "$stage" smid-0768
+archive="$repo/build/smid-0768-limited-range-debian12-amd64.tar.gz"
+tar -czf "$archive" -C "$stage" smid-0768-limited-range
 sha256sum "$archive"
 printf 'Bundle: %s\nBuild tree: %s\n' "$archive" "$dest"

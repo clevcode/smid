@@ -16,6 +16,11 @@ the required JPEG bands, and sends the adapter protocol over USB. The default
 runtime path uses VA-API for hardware accelerated JPEG encoding, adaptive JPEG
 quality, cursor commands, USB recovery, and per-frame dirty detection.
 
+Both encoders convert desktop RGB into limited-range BT.601 samples before
+JPEG compression, matching the vendor driver's colour levels. This also
+applies to CPU-generated companion rectangles. JPEG quality controls compression
+loss separately; increasing it cannot correct a colour-range mismatch.
+
 ## Requirements
 
 - Linux with the EVDI kernel module and libevdi development files

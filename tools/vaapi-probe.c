@@ -120,8 +120,8 @@ static int check_jpeg(tjhandle decoder, const uint8_t *jpeg, unsigned long len,
                 width, height, subsampling, colours);
         return -1;
     }
-    if (tjDecompress2(decoder, jpeg, len, decoded, width, width * 3, height,
-                      TJPF_RGB, TJFLAG_ACCURATEDCT | TJFLAG_STOPONWARNING)) {
+    if (tjDecompressToYUV2(decoder, jpeg, len, decoded, width, 1, height,
+                           TJFLAG_ACCURATEDCT | TJFLAG_STOPONWARNING)) {
         fprintf(stderr, "FAIL: JPEG decode: %s\n", tjGetErrorStr2(decoder));
         return -1;
     }
@@ -136,10 +136,21 @@ static int check_jpeg(tjhandle decoder, const uint8_t *jpeg, unsigned long len,
         for (int x = 8; x < width - 8; x++) {
             if (x % 240 < 8 || x % 240 >= 232)
                 continue;
-            const uint8_t *expected = source + (size_t)source_y * STRIDE + x * 4;
-            const uint8_t *actual = decoded + ((size_t)y * width + x) * 3;
+            const uint8_t *pixel = source + (size_t)source_y * STRIDE + x * 4;
+            double red = pixel[2], green = pixel[1], blue = pixel[0];
+            /* Independent BT.601 video-range reference. Decode raw samples:
+             * a normal JPEG-to-RGB decoder would assume full range instead. */
+            int expected[3] = {
+                (int)(16 + (0.299 * red + 0.587 * green + 0.114 * blue) * 219 / 255 + 0.5),
+                (int)(128 + (-0.168736 * red - 0.331264 * green + 0.5 * blue) * 224 / 255 + 0.5),
+                (int)(128 + (0.5 * red - 0.418688 * green - 0.081312 * blue) * 224 / 255 + 0.5),
+            };
+            size_t y_size = (size_t)width * height;
+            size_t uv_pos = (size_t)(y / 2) * (width / 2) + x / 2;
+            int actual[3] = {decoded[(size_t)y * width + x],
+                             decoded[y_size + uv_pos], decoded[y_size * 5 / 4 + uv_pos]};
             for (int c = 0; c < 3; c++) {
-                unsigned error = (unsigned)abs((int)expected[2 - c] - actual[c]);
+                unsigned error = (unsigned)abs(expected[c] - actual[c]);
                 sum[c] += error;
                 if (error > max_error)
                     max_error = error;
@@ -147,12 +158,12 @@ static int check_jpeg(tjhandle decoder, const uint8_t *jpeg, unsigned long len,
             count++;
         }
     }
-    double r = (double)sum[0] / count;
-    double g = (double)sum[1] / count;
-    double b = (double)sum[2] / count;
-    printf("  JPEG %dx%d baseline 4:2:0, %lu bytes; patch MAE RGB %.3f/%.3f/%.3f, max %u\n",
-           width, height, len, r, g, b, max_error);
-    if (r > 4 || g > 4 || b > 4 || max_error > 12) {
+    double y_mae = (double)sum[0] / count;
+    double cb_mae = (double)sum[1] / count;
+    double cr_mae = (double)sum[2] / count;
+    printf("  JPEG %dx%d baseline 4:2:0, %lu bytes; limited-range patch MAE Y/Cb/Cr %.3f/%.3f/%.3f, max %u\n",
+           width, height, len, y_mae, cb_mae, cr_mae, max_error);
+    if (y_mae > 4 || cb_mae > 4 || cr_mae > 4 || max_error > 12) {
         fprintf(stderr, "FAIL: decoded colours/crop differ from the source\n");
         return -1;
     }
@@ -227,7 +238,7 @@ int main(int argc, char **argv) {
         return 2;
     }
     setvbuf(stdout, NULL, _IOLBF, 0);
-    printf("smid encoder probe v1; synthetic input only; no USB or EVDI\n");
+    printf("smid encoder probe v2; limited-range BT.601; synthetic input only; no USB or EVDI\n");
     printf("Mode: %s\n", cpu ? "CPU SELF-TEST (no VA-API validation)" : "strict direct-vaapi");
     const char *driver = getenv("LIBVA_DRIVER_NAME");
     printf("LIBVA_DRIVER_NAME=%s\n", driver ? driver : "(unset)");

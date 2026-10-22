@@ -13,6 +13,8 @@ struct smid_encoder {
     int width;
     int height;
     void *tj;
+    uint8_t *cpu_yuv;
+    unsigned long cpu_yuv_cap;
     unsigned long jpeg_cap;
     struct smid_direct_vaapi *direct;
 };

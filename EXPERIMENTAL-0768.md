@@ -11,13 +11,20 @@ with retained frames enabled. The supplied logs show direct VA-API encoding and
 clean shutdown in the timed run. Long-term stability remains under evaluation.
 For automatic startup as a regular user, see [the service setup](tools/SYSTEMD.md).
 
+This updated build changes both VA-API and CPU conversion to limited-range
+BT.601, matching the vendor's encoded colour levels. It addresses the suspected
+cause of light-grey borders disappearing against white, even at fixed Q98.
+Local encoder checks pass, including near-white borders and retained-frame
+companion rectangles; the improvement on Clayton's physical monitors still
+needs confirmation. Limited range is the default; no extra flag is needed.
+
 ## Run the supplied Debian 12 amd64 executable
 
 Extract the attachment in your home directory:
 
 ```sh
-tar -xzf smid-0768-debian12-amd64.tar.gz
-cd smid-0768
+tar -xzf smid-0768-limited-range-debian12-amd64.tar.gz
+cd smid-0768-limited-range
 sha256sum -c SHA256SUMS
 ```
 
@@ -68,10 +75,15 @@ the service has a different name, use its actual name in the stop/start commands
 both userspace drivers must not run together. No permanent service/udev changes
 are required for the root-run trial above.
 
+For this update, compare the same light-grey input borders against white and
+report whether their visibility improves. The startup log should include
+`color-range=limited`. Start with normal adaptive quality; `--jpeg-quality 98
+--jpeg-fixed-quality` remains available for a fixed-quality comparison.
+
 Send the smid log and whether both desktops and cursors appeared correctly.
 The log records USB selection, initialization failures, encoder selection and
-retained-frame mode. CPU savings should be measured during comparable desktop
-activity after output is working.
+retained-frame mode and colour range. CPU savings should be measured during
+comparable desktop activity after output is working.
 
 ## Build from the included sources
 

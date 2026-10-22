@@ -6,9 +6,15 @@ WRAPS := get_device get_config_descriptor_by_value free_config_descriptor \
     set_auto_detach_kernel_driver get_configuration set_configuration \
     claim_interface set_interface_alt_setting release_interface close
 .PHONY: all
-all: build/tests/runtime build/tests/usb-selection
+all: build/tests/runtime build/tests/usb-selection build/tests/encoder-range
 	./build/tests/runtime
 	./build/tests/usb-selection
+	./build/tests/encoder-range
+build/tests/encoder-range: tests/encoder_range.c encoder.c encoder.h log.c log.h
+	mkdir -p $(@D)
+	$(CC) $(FLAGS) $(shell pkg-config --cflags libva libva-drm libturbojpeg) \
+		tests/encoder_range.c encoder.c log.c -pthread \
+		$(shell pkg-config --libs libva libva-drm libturbojpeg) -o $@
 build/tests/runtime: tests/runtime.c main.c protocol.c protocol.h usb.h evdi_source.h
 	mkdir -p $(@D)
 	$(CC) $(FLAGS) tests/runtime.c protocol.c -Wl,--gc-sections -o $@
