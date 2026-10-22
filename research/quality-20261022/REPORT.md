@@ -207,3 +207,14 @@ and the corrected Skylake VPP output remain to be confirmed on Clayton's setup.
 The Debian 12 update is packaged separately as
 `build/smid-0768-limited-range-debian12-amd64.tar.gz`, preserving the earlier
 working driver and user-service archives for rollback.
+
+The delivered archive was built from `0cf186e2b70727be3f0420e26758b7801a8c321f`:
+SHA-256 `de6cdf2c99b1fcf611bd319d995e3e10e67129372b1c22231ac3077768a45655`
+(239,108 bytes). The Debian 12 build passed all three test suites and CLI
+help/invalid-PID/no-device checks with no GPU/USB passthrough. All 25 manifest
+checksums, committed encoder/test source, executable mode and bundled EVDI
+library/link were verified from the archive. The original archive's SHA-256
+remains `6486c50fe2b75171a01bda6c36689219f6730bfb03bacc84aa8b177cb8855c6b`.
+Packaging output and verification are retained in
+`build/package-0768-limited-range.log` and
+`build/limited-range-package-verification.json`.
