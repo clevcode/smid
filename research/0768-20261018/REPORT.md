@@ -265,7 +265,7 @@ The vendor service was automatically reactivated after `systemctl stop`;
 errors. The supplied successful logs do not identify the reactivation trigger.
 The trial instructions now include runtime masking and matching unmask rollback.
 
-## Next step
+## Deployment follow-up (2026-10-21)
 
 Continue ordinary use of the already working build. The optional
 [GNOME user-service setup](../../tools/SYSTEMD.md) supplies login-time startup,
@@ -273,6 +273,17 @@ USB/EVDI/render-node groups, boot-time EVDI devices, vendor masking and rollback
 It is a configuration change, not a new encoder/USB probe. The existing binary
 archive remains unchanged. Service syntax can be checked locally; actual
 non-root startup and cold-boot behavior on Clayton's system remain to be verified.
+
+## Follow-up shared 2026-11-14: colour correction confirmed
+
+Clayton reports that the subsequent limited-range build restores light-grey
+borders and details on his Acer and HQ monitors. Latest approximate process CPU
+usage remains low at 31% versus 136% with the vendor driver, around 77% lower in
+his ordinary workloads. His Rise Mode monitor still has an unresolved quality
+difference through the adapter and is used via direct HDMI. After a kernel
+update, a reboot and manual driver handover restored operation when EVDI had
+initially not loaded. See the [colour investigation follow-up](../quality-20261022/REPORT.md)
+for the scope of this tester-reported confirmation.
 
 ## Reproduction
 

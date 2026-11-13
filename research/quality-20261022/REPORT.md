@@ -1,5 +1,10 @@
 # Light-grey loss and adaptive quality audit, 2026-10-22
 
+Current status: a follow-up shared on 2026-11-14 confirms that the limited-range
+build restores light-grey borders on Clayton's Acer and HQ monitors. The audit
+and local validation below retain their original evidence boundaries; see the
+physical follow-up at the end for the subsequent tester result.
+
 Initial source inspected: `311cc40`. Clayton reports light-grey borders disappearing
 against white with smid, consistently across three monitors, while the vendor
 driver preserves them. Fixed Q98 and the CPU encoder reportedly do not resolve
@@ -218,3 +223,23 @@ remains `6486c50fe2b75171a01bda6c36689219f6730bfb03bacc84aa8b177cb8855c6b`.
 Packaging output and verification are retained in
 `build/package-0768-limited-range.log` and
 `build/limited-range-package-verification.json`.
+
+## Physical follow-up shared 2026-11-14
+
+Clayton reports that the limited-range build substantially improves image
+quality on his Acer and HQ monitors, with light-grey borders and details now
+visible as expected. This supplies the physical output confirmation that was
+pending above. The Rise Mode monitor still differs when connected through the
+adapter; using direct HDMI for that monitor works well. Its remaining issue is
+unresolved, so the report does not establish identical output on every monitor.
+
+His latest approximate process CPU measurements are 31% for smid and 136% for
+the Silicon Motion driver, about 77% lower. These are tester-reported values
+from ordinary use, not a new controlled benchmark or independently inspected
+pidstat log. They supersede neither the earlier exact samples nor their caveats.
+
+After a Debian kernel update, EVDI was initially not loaded. He reports that a
+reboot, stopping the proprietary driver and starting smid restored operation.
+The exact module-loading cause and automatic service recovery were not tested.
+This follow-up was supplied as email text; no new raw logs or photos were
+provided with it.

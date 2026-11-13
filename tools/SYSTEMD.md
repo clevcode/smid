@@ -40,7 +40,7 @@ If masking reports an existing file instead of succeeding, stop here and inspect
 
 ## 3. Grant device access and prepare EVDI for boot
 
-From this setup bundle's directory, run its updated permission installer:
+From the repository or driver package root, run its permission installer:
 
 ```sh
 sudo bash ./install-udev-rules.sh
@@ -77,17 +77,17 @@ update also carries the option into early boot if EVDI is loaded there.
 
 ## 4. Install the user service and reboot when convenient
 
-From this setup bundle's directory:
+From the repository or full driver package root:
 
 ```sh
 mkdir -p "$HOME/.config/systemd/user"
-install -m 0644 ./smid-0768.service "$HOME/.config/systemd/user/"
+install -m 0644 ./tools/smid-0768.service "$HOME/.config/systemd/user/"
 systemctl --user daemon-reload
 systemctl --user enable smid-0768.service
 ```
 
-If using the repository rather than the setup bundle, the service file is under
-`tools/`. Save your work and reboot when convenient. At the next GNOME login,
+In the older service-only setup bundle, use `./smid-0768.service` instead.
+Save your work and reboot when convenient. At the next GNOME login,
 smid starts with iHD and retained-frame optimization enabled. The service uses
 no `sudo` and has no `--seconds` limit.
 

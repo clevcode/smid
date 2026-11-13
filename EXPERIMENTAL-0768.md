@@ -11,16 +11,38 @@ with retained frames enabled. The supplied logs show direct VA-API encoding and
 clean shutdown in the timed run. Long-term stability remains under evaluation.
 For automatic startup as a regular user, see [the service setup](tools/SYSTEMD.md).
 
-This updated build changes both VA-API and CPU conversion to limited-range
-BT.601, matching the vendor's encoded colour levels. It addresses the suspected
-cause of light-grey borders disappearing against white, even at fixed Q98.
-Local encoder checks pass, including near-white borders and retained-frame
-companion rectangles; the improvement on Clayton's physical monitors still
-needs confirmation. Limited range is the default; no extra flag is needed.
+Both VA-API and CPU conversion use limited-range BT.601, matching the vendor's
+encoded colour levels. Clayton confirmed that this correction restored
+light-grey borders and details on his Acer and HQ monitors. Limited range is
+the default; no extra flag is needed. His Rise Mode monitor still has some
+image-quality differences through the adapter and is currently connected
+directly over HDMI; their cause remains unresolved.
+
+His latest measurements were approximately 31% average process CPU with smid
+versus 136% with the vendor driver, roughly 77% lower. These are tester-reported
+results from ordinary use, not identical-workload benchmarks. After a Debian
+kernel update he also reported EVDI initially not being loaded; operation
+resumed after a reboot, stopping the vendor service and launching smid. This
+does not establish automatic recovery or login-time service operation.
+
+## Build from a Git checkout
+
+From the repository root on Debian 12:
+
+```sh
+sudo apt install build-essential pkg-config git libusb-1.0-0-dev libva-dev \
+  libdrm-dev libturbojpeg0-dev
+make -j4 USE_SYSTEM_TURBOJPEG=1 USE_BUNDLED_EVDI=1
+```
+
+This fetches and builds the pinned EVDI userspace library and uses system
+libjpeg-turbo. Keep the working EVDI kernel module and the configured Intel iHD
+driver. If switching build configurations, run `make clean` first. Then follow
+the driver handover commands below; extracting a binary package is unnecessary.
 
 ## Run the supplied Debian 12 amd64 executable
 
-Extract the attachment in your home directory:
+If you have the experimental binary package, extract it in your home directory:
 
 ```sh
 tar -xzf smid-0768-limited-range-debian12-amd64.tar.gz
@@ -75,12 +97,13 @@ the service has a different name, use its actual name in the stop/start commands
 both userspace drivers must not run together. No permanent service/udev changes
 are required for the root-run trial above.
 
-For this update, compare the same light-grey input borders against white and
-report whether their visibility improves. The startup log should include
+For image-quality comparisons, use the same light-grey input borders against
+white with each driver. The startup log should include
 `color-range=limited`. Start with normal adaptive quality; `--jpeg-quality 98
 --jpeg-fixed-quality` remains available for a fixed-quality comparison.
 
-Send the smid log and whether both desktops and cursors appeared correctly.
+When reporting a problem, include the smid log, monitor model and whether both
+desktops and cursors appeared correctly.
 The log records USB selection, initialization failures, encoder selection and
 retained-frame mode and colour range. CPU savings should be measured during
 comparable desktop activity after output is working.
