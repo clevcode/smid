@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Independently decode Clayton's synthetic probe images without extracting tar paths."""
+"""Independently decode submitted synthetic probe images without extracting tar paths."""
 import hashlib
 import io
 import json

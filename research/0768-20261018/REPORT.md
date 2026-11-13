@@ -2,8 +2,8 @@
 
 The submitted Wavlink adapter uses the same observed JPEG display protocol as
 smid's 090c:0760 device. This is strong evidence that a port can reuse the frame
-encoder and packet builder. Clayton subsequently passed the exact VA-API
-pipeline on his HD 520 and reported successful USB/desktop operation on October
+encoder and packet builder. Subsequent testing passed the exact VA-API pipeline
+on the HD 520 system and confirmed successful USB/desktop operation on October
 21 (see the follow-ups below). Longer-term stability remains under evaluation.
 
 The first concrete device-selection change is interface **4**, alternate setting
@@ -155,7 +155,7 @@ The earlier missing-capability observations above describe the initial
   EVDI DKMS module for kernel 6.1.0-53-amd64; Intel render node `renderD128`;
   i965 2.4.1+dfsg1-1, iHD 23.1.1+dfsg1-1, libva2 2.17.0-1 and libusb
   1.0.26. The non-free package entries had no installed version. The separate
-  i965 capability test reported by Clayton also lacked VideoProc.
+  i965 capability test reported for the same system also lacked VideoProc.
 - `~/Downloads/smid-vainfo-ihd.txt`, SHA-256
   `8ea3b207365741c22ed82cd428baa487195d330011cc8583f42c47b9b37c7419`:
   after the suggested non-free iHD package change, libva successfully loads
@@ -179,12 +179,12 @@ and system libjpeg-turbo 2.1.5:
 - The source bundle extracted, built and ran independently with its supplied
   runner; it produced an archive of logs, reference PPMs and all JPEGs.
 
-These are local encoder results, not acceptance on Clayton's HD 520, a test of
-the 0768 USB device, or a CPU/performance comparison. Production driver source
-is unchanged; PID/interface selection, the target-B ACK issue and initialization
+These are local encoder results, not acceptance on the target HD 520 system,
+a test of the 0768 USB device, or a CPU/performance comparison. Production driver
+source is unchanged; PID/interface selection, the target-B ACK issue and initialization
 differences remain port work.
 
-## Follow-up: Clayton encoder acceptance and experimental driver (2026-10-20)
+## Follow-up: HD 520 encoder acceptance and experimental driver (2026-10-20)
 
 `~/Downloads/vaapi-probe-results.kT27Nd.tar.gz` has SHA-256
 `f84b81e6493d82f15defe54f65642fe70153c45037229d59954c280fde908386`.
@@ -196,7 +196,7 @@ also pass all 24 images, with a worst channel error of 3/255. Reproduction:
 ```sh
 python3 research/0768-20261018/verify_probe_results.py \
   /home/je/Downloads/vaapi-probe-results.kT27Nd.tar.gz \
-  research/0768-20261018/generated/clayton-vaapi-verified.json
+  research/0768-20261018/generated/hd520-vaapi-verified.json
 ```
 
 The experimental full driver now provides:
@@ -224,10 +224,11 @@ The experimental full driver now provides:
 
 ## Follow-up: successful physical adapter test (2026-10-21)
 
-Clayton reports both 1920x1080@60 monitors, native cursors, window movement and
-normal desktop interaction work without stale/black regions or other observed
-artifacts. Retained-frame behavior remained enabled; he did not need the opt-out.
-The existing initialization sequence is sufficient for his tested handover from
+The hardware test report confirms both 1920x1080@60 monitors, native cursors,
+window movement and normal desktop interaction work without stale/black regions
+or other observed artifacts. Retained-frame behavior remained enabled; the
+opt-out was not needed.
+The existing initialization sequence is sufficient for the tested handover from
 the vendor driver. A cold boot without the vendor driver having initialized the
 adapter, login-time startup, suspend/resume and long-term use are not yet proven.
 
@@ -242,9 +243,9 @@ Both show interface 4/alternate 1, two 1920x1080@60 BGRX EVDI modes, four
 successful iHD initializations, `encoder=direct-vaapi` and `retained-frames=on`.
 Neither contains a reported error, timeout, recovery or software fallback. The
 `-long` log is the timed run and includes `smid: exiting` plus release of both
-EVDI cards. It confirms userspace EVDI 1.14.2 works with his kernel module
-1.14.16. The shorter file says `until interrupted` and ends at streaming startup;
-it does not establish shutdown or duration. Neither log includes timestamps or
+EVDI cards. It confirms userspace EVDI 1.14.2 works with the installed kernel
+module 1.14.16. The shorter file says `until interrupted` and ends at streaming
+startup; it does not establish shutdown or duration. Neither log includes timestamps or
 CPU samples; the filename is not duration evidence. The 60 Hz mode and 60 fps
 target do not measure delivered frame rate.
 
@@ -258,7 +259,7 @@ CPU measurements are tester-reported, separate 120-second `pidstat` samples:
 `100 * (135.86 - 26.81) / 135.86 = 80.266%` lower sampled process CPU. These are
 uncontrolled workloads, not a standardized benchmark or a whole-system CPU
 comparison. With the supplied `pidstat` command (no `-I`), 100% represents one
-logical CPU. Clayton also reports about 1% for static USB displays.
+logical CPU. The report also notes about 1% for static USB displays.
 
 The vendor service was automatically reactivated after `systemctl stop`;
 `systemctl mask --runtime --now smiusbdisplay.service` resolved interface-busy
@@ -272,14 +273,15 @@ Continue ordinary use of the already working build. The optional
 USB/EVDI/render-node groups, boot-time EVDI devices, vendor masking and rollback.
 It is a configuration change, not a new encoder/USB probe. The existing binary
 archive remains unchanged. Service syntax can be checked locally; actual
-non-root startup and cold-boot behavior on Clayton's system remain to be verified.
+non-root startup and cold-boot behavior on the target system remain to be verified.
 
 ## Follow-up shared 2026-11-14: colour correction confirmed
 
-Clayton reports that the subsequent limited-range build restores light-grey
-borders and details on his Acer and HQ monitors. Latest approximate process CPU
-usage remains low at 31% versus 136% with the vendor driver, around 77% lower in
-his ordinary workloads. His Rise Mode monitor still has an unresolved quality
+Follow-up testing confirms that the subsequent limited-range build restores
+light-grey borders and details on the tested Acer and HQ monitors. Latest
+approximate process CPU usage remains low at 31% versus 136% with the vendor
+driver, around 77% lower in ordinary workloads. The tested Rise Mode monitor
+still has an unresolved quality
 difference through the adapter and is used via direct HDMI. After a kernel
 update, a reboot and manual driver handover restored operation when EVDI had
 initially not loaded. See the [colour investigation follow-up](../quality-20261022/REPORT.md)

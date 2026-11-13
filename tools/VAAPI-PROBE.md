@@ -34,9 +34,9 @@ Each run creates a new directory, preserving previous results.
 
 The production encoder selects the first openable node from
 `/dev/dri/renderD128`, `/dev/dri/renderD129`, `/dev/dri/card0`. This matches the
-known Intel `renderD128` configuration on Clayton's machine. The probe retains
-that behaviour; it does not add a device-selection override. For other machines,
-check the logged DRM paths before interpreting results.
+Intel `renderD128` configuration on the tested Debian 12 / HD 520 system. The
+probe retains that behaviour; it does not add a device-selection override. For
+other machines, check the logged DRM paths before interpreting results.
 
 ## What it checks
 

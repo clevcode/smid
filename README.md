@@ -8,12 +8,11 @@ USB device.
 
 Experimental support for Wavlink `090c:0768` adapters is available with
 `--usb-pid 0768`. See [the 0768 build and run instructions](EXPERIMENTAL-0768.md).
-Clayton has confirmed dual 1080p output, native cursors and retained-frame
-updates on his Debian 12 / Intel HD 520 setup. The limited-range colour correction
-restored light-grey details on his Acer and HQ monitors. His latest measurements
-were approximately 31% process CPU versus 136% with the vendor driver, around
-77% lower in his workloads; these were not controlled benchmarks. Image-quality
-differences remain on his Rise Mode monitor, which he uses via direct HDMI.
+Dual 1080p output, native cursors and retained-frame updates have been confirmed
+on a Debian 12 / Intel HD 520 setup. Reported process CPU usage was approximately
+31% versus 136% with the vendor driver, around 77% lower in ordinary use; these
+were not controlled benchmarks. The 0768 guide records the tested monitor
+results and remaining image-quality limitations.
 
 The driver creates EVDI virtual displays, captures their framebuffers, encodes
 the required JPEG bands, and sends the adapter protocol over USB. The default
@@ -134,6 +133,10 @@ enabled by default for both supported PIDs.
 - Protocol investigation notes and offline analysis helpers are under
   `research/`. Raw USB captures, tester logs and generated screen data are kept
   out of the repository.
+
+## Credits
+
+See [CREDITS.md](CREDITS.md) for testing and feedback contributions.
 
 ## License
 

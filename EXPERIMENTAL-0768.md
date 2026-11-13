@@ -5,23 +5,24 @@ native cursor updates and dirty-frame skipping. It selects display interface
 4/alternate 1 for the 0768. Retained-frame companion updates remain enabled by
 default; `--no-retained-frames` disables them if they cause stale/black regions.
 
-Clayton's Intel HD 520 passed the production encoder probe and, on October 21,
-he confirmed both USB monitors, cursors and desktop interaction work correctly
-with retained frames enabled. The supplied logs show direct VA-API encoding and
-clean shutdown in the timed run. Long-term stability remains under evaluation.
+Testing on Debian 12 with Intel HD Graphics 520 passed the production encoder
+probe. On October 21, the hardware test report confirmed both USB monitors,
+cursors and desktop interaction work correctly with retained frames enabled.
+The supplied logs show direct VA-API encoding and clean shutdown in the timed
+run. Long-term stability remains under evaluation.
 For automatic startup as a regular user, see [the service setup](tools/SYSTEMD.md).
 
 Both VA-API and CPU conversion use limited-range BT.601, matching the vendor's
-encoded colour levels. Clayton confirmed that this correction restored
-light-grey borders and details on his Acer and HQ monitors. Limited range is
-the default; no extra flag is needed. His Rise Mode monitor still has some
-image-quality differences through the adapter and is currently connected
+encoded colour levels. Follow-up testing confirmed that this correction restored
+light-grey borders and details on the tested Acer and HQ monitors. Limited range
+is the default; no extra flag is needed. The tested Rise Mode monitor still has
+some image-quality differences through the adapter and is currently connected
 directly over HDMI; their cause remains unresolved.
 
-His latest measurements were approximately 31% average process CPU with smid
-versus 136% with the vendor driver, roughly 77% lower. These are tester-reported
-results from ordinary use, not identical-workload benchmarks. After a Debian
-kernel update he also reported EVDI initially not being loaded; operation
+The latest reported measurements were approximately 31% average process CPU
+with smid versus 136% with the vendor driver, roughly 77% lower. These are
+tester-reported results from ordinary use, not identical-workload benchmarks.
+After a Debian kernel update, the report also noted EVDI initially not being loaded; operation
 resumed after a reboot, stopping the vendor service and launching smid. This
 does not establish automatic recovery or login-time service operation.
 

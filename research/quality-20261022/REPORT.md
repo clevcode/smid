@@ -1,13 +1,14 @@
 # Light-grey loss and adaptive quality audit, 2026-10-22
 
 Current status: a follow-up shared on 2026-11-14 confirms that the limited-range
-build restores light-grey borders on Clayton's Acer and HQ monitors. The audit
+build restores light-grey borders on the tested Acer and HQ monitors. The audit
 and local validation below retain their original evidence boundaries; see the
 physical follow-up at the end for the subsequent tester result.
 
-Initial source inspected: `311cc40`. Clayton reports light-grey borders disappearing
-against white with smid, consistently across three monitors, while the vendor
-driver preserves them. Fixed Q98 and the CPU encoder reportedly do not resolve
+Initial source inspected: `311cc40`. The hardware test report describes
+light-grey borders disappearing against white with smid, consistently across
+three monitors, while the vendor driver preserves them. Fixed Q98 and the CPU
+encoder reportedly do not resolve
 it. The previously prepared user-service reply/archive has not been sent.
 
 ## Strongest lead: encoded colour range differs
@@ -18,7 +19,7 @@ paths (`encoder.c`, around lines 599 and 876). The CPU path used standard
 libjpeg-turbo BGRX-to-JPEG
 encoding, also producing full-range values in the baseline tests below.
 
-Reanalysis of Clayton's original vendor-driver capture included all 820 JPEGs,
+Reanalysis of the submitted vendor-driver capture included all 820 JPEGs,
 sampling every eighth pixel horizontally and vertically. Neutral means decoded
 RGB channel spread <= 2; no screen images were saved or displayed. Among
 1,795,758 sampled neutral pixels:
@@ -45,7 +46,7 @@ provides independent corroboration. The binary's
 The luma coefficients sum to 56294/65536, approximately 219/255, with a +16
 offset. This is a modified limited-range RGB-to-YCbCr converter, not the ordinary
 full-range conversion smid previously used. This is the vendor binary on pony,
-not a binary collected from Clayton; his actual capture independently shows
+not a binary collected from the target system; the submitted capture shows
 matching range characteristics. Disassembly is saved locally under `generated/`.
 
 If the adapter interprets incoming luma as limited range, full-range values from
@@ -68,7 +69,7 @@ used the original full-range encoder. It encodes
 synthetic BGRX flat greys and one-pixel grey borders on white through the actual
 region API, both 1920x544 bands at y=0 and y=536, using CPU and iHD at Q70/Q98/Q100.
 It rejects backend fallback. Pillow independently decodes the resulting JPEGs.
-No USB/EVDI devices are opened. This local GPU is not Clayton's HD 520.
+No USB/EVDI devices are opened. This local GPU is not the target system's HD 520.
 
 | Backend / quality | Maximum flat-patch error | Maximum one-pixel border error |
 | --- | ---: | ---: |
@@ -185,8 +186,9 @@ samples and raw Y/Cb/Cr JPEG decoding rather than a full-range RGB viewer:
   libjpeg-turbo and bundled userspace EVDI.
 
 Local hardware is Intel Raptor Lake-S UHD Graphics (8086:a788), iHD 24.1.0 and
-libva 2.20.0, not Clayton's Skylake. Hardware fixtures use production geometry:
-1920x544 bands, and 1920x1080 USER_PTR sources at stride 7680 with crop y=536.
+libva 2.20.0, not the target system's Skylake. Hardware fixtures use production
+geometry: 1920x544 bands, and 1920x1080 USER_PTR sources at stride 7680 with crop
+y=536.
 An initial artificial 512x64 GPU fixture produced a small range offset (white
 237 rather than 235); an artificial 1952-wide USER_PTR fixture failed allocation.
 Those failed attempts remain in the local build logs. The production-size tests
@@ -208,7 +210,7 @@ Local logs are retained in `build/limited-range-tests-final.log`,
 `build/probe-limited-{cpu,vaapi,negative}.log` and
 `build/limited-range-driver-build.log`. No USB device or live display service
 was touched for these checks. Physical highlight visibility, sustained CPU cost
-and the corrected Skylake VPP output remain to be confirmed on Clayton's setup.
+and the corrected Skylake VPP output remain to be confirmed on the target setup.
 The Debian 12 update is packaged separately as
 `build/smid-0768-limited-range-debian12-amd64.tar.gz`, preserving the earlier
 working driver and user-service archives for rollback.
@@ -226,20 +228,21 @@ Packaging output and verification are retained in
 
 ## Physical follow-up shared 2026-11-14
 
-Clayton reports that the limited-range build substantially improves image
-quality on his Acer and HQ monitors, with light-grey borders and details now
-visible as expected. This supplies the physical output confirmation that was
-pending above. The Rise Mode monitor still differs when connected through the
+The follow-up report confirms that the limited-range build substantially
+improves image quality on the tested Acer and HQ monitors, with light-grey
+borders and details now visible as expected. This supplies the physical output
+confirmation that was pending above. The Rise Mode monitor still differs when connected through the
 adapter; using direct HDMI for that monitor works well. Its remaining issue is
 unresolved, so the report does not establish identical output on every monitor.
 
-His latest approximate process CPU measurements are 31% for smid and 136% for
+The latest approximate process CPU measurements are 31% for smid and 136% for
 the Silicon Motion driver, about 77% lower. These are tester-reported values
 from ordinary use, not a new controlled benchmark or independently inspected
 pidstat log. They supersede neither the earlier exact samples nor their caveats.
 
-After a Debian kernel update, EVDI was initially not loaded. He reports that a
-reboot, stopping the proprietary driver and starting smid restored operation.
+After a Debian kernel update, EVDI was initially not loaded. The report states
+that a reboot, stopping the proprietary driver and starting smid restored
+operation.
 The exact module-loading cause and automatic service recovery were not tested.
 This follow-up was supplied as email text; no new raw logs or photos were
 provided with it.

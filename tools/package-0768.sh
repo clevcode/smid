@@ -13,7 +13,7 @@ mkdir -p build
 stage=$(mktemp -d "$repo/build/0768-package.XXXXXX")
 dest="$stage/smid-0768-limited-range"
 mkdir -p "$dest/tools" "$dest/tests" "$dest/vendor/evdi"
-cp -- *.c *.h Makefile LICENSE README.md EXPERIMENTAL-0768.md \
+cp -- *.c *.h Makefile LICENSE README.md CREDITS.md EXPERIMENTAL-0768.md \
     99-smid.rules install-udev-rules.sh "$dest/"
 cp tools/*.c tools/*.mk tools/*.md tools/*.sh tools/*.service tools/Dockerfile.bookworm "$dest/tools/"
 cp tests/Makefile tests/runtime.c tests/usb_selection.c tests/encoder_range.c "$dest/tests/"

@@ -1,7 +1,7 @@
 # Wavlink 0768: run smid as your desktop user
 
-This setup is for Clayton's Debian 12 / GNOME on X11 installation. It uses the
-already working executable and starts it at graphical login. It does not provide
+This setup targets Debian 12 with GNOME on X11. It uses the already working
+executable and starts it at graphical login. It does not provide
 USB monitors at the login screen. The service file has been syntax-checked;
 login, reboot, suspend/resume and hotplug still need normal-use validation on the
 target machine. No additional encoder or USB capture probe is needed.
@@ -52,8 +52,8 @@ render node. The reboot below refreshes group membership for the user service
 manager as well as your shell.
 
 The EVDI devices must already exist when smid starts as a regular user. Creating
-them through `/sys/devices/evdi/add` requires root. Clayton's supplied `modinfo`
-confirms that his installed module supports `initial_device_count`.
+them through `/sys/devices/evdi/add` requires root. The `modinfo` output supplied
+for the tested installation confirms support for `initial_device_count`.
 
 Arrange for the installed module to load at boot:
 
