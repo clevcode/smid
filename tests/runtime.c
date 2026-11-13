@@ -25,6 +25,12 @@ int main(void) {
     }
     assert(video_make_send_plan(NULL, 1, 15, retained, true, &plan) == 0);
     assert(plan.send_mask == 3 && plan.companion_mask == 2);
+    /* DPMS blanking must preserve another display's update, and must replace
+     * companions/hash history with full black bands for the blanked display. */
+    video_plan_apply_blank(&plan, 12);
+    assert(plan.send_mask == 15 && plan.companion_mask == 2 && plan.hash_valid_mask == 3);
+    video_plan_apply_blank(&plan, 3);
+    assert(plan.send_mask == 15 && plan.companion_mask == 0 && plan.hash_valid_mask == 0);
     hash_calls = 0;
     for (unsigned dirty = 0; dirty < 16; dirty++) {
         assert(video_make_send_plan(NULL, dirty, 15, retained, false, &plan) == 0);
@@ -35,6 +41,8 @@ int main(void) {
     assert(hash_calls == 0);
     assert(video_make_send_plan(NULL, 4, 3, retained, false, &plan) == 0);
     assert(plan.send_mask == 0); /* Ignore damage on a disabled display. */
+    video_plan_apply_blank(&plan, 3);
+    assert(plan.send_mask == 3 && plan.companion_mask == 0 && plan.hash_valid_mask == 0);
 
     uint8_t packet[24] = {0};
     memcpy(packet, SMID_MAGIC, 12);
@@ -52,6 +60,6 @@ int main(void) {
             assert(!smid_parse_frame_ack(packet, sizeof(packet), &stream, &seq));
         }
     }
-    puts("PASS: retained-frame opt-out, static-frame skipping, both ACK targets and 32-bit sequences");
+    puts("PASS: retained-frame opt-out, DPMS blanking, static-frame skipping, both ACK targets and 32-bit sequences");
     return 0;
 }

@@ -56,6 +56,7 @@ struct smid_video_build_worker {
     int quality;
     int slot;
     bool companion;
+    bool black;
 };
 
 struct smid_video_inflight {
@@ -415,6 +416,12 @@ static int video_make_send_plan(struct smid_evdi_source *evdi, uint8_t dirty,
     return 0;
 }
 
+static void video_plan_apply_blank(struct smid_video_send_plan *plan, uint8_t blank_mask) {
+    plan->send_mask |= blank_mask;
+    plan->companion_mask &= (uint8_t)~blank_mask;
+    plan->hash_valid_mask &= (uint8_t)~blank_mask;
+}
+
 static int video_tile_init(struct smid_video_tile *t, int stream, int tile,
                            enum smid_encoder_backend backend) {
     memset(t, 0, sizeof(*t));
@@ -481,6 +488,40 @@ static int encode_evdi_bgrx_region(void *ctx, const uint8_t *bgrx,
                                            e->rect.x, e->rect.y, e->rect.w, e->rect.h,
                                            e->quality, e->jpeg_out, e->jpeg_cap,
                                            e->jpeg_len);
+}
+
+static int write_black_bgrx(void *ctx, uint8_t *dst, int dst_pitch,
+                            int width, int height) {
+    (void)ctx;
+    if (!dst || dst_pitch < width * 4) {
+        return -1;
+    }
+    size_t row_bytes = (size_t)width * 4u;
+    for (int y = 0; y < height; y++) {
+        memset(dst + (size_t)y * (size_t)dst_pitch, 0, row_bytes);
+    }
+    return 0;
+}
+
+static int video_tile_build_black(struct smid_video_tile *t, int slot,
+                                  struct smid_cnm *cnm, uint32_t seq,
+                                  int quality) {
+    if (slot < 0 || slot > 1) {
+        return -1;
+    }
+    uint8_t *jpeg_out = smid_frame_slot_jpeg_data(&t->frame[slot]);
+    if (!jpeg_out) {
+        return -1;
+    }
+    t->jpeg_len = t->jpeg_cap;
+    if (smid_encoder_encode_bgrx_with_writer(&t->encoder, write_black_bgrx, NULL,
+                                             quality, jpeg_out, t->jpeg_cap,
+                                             &t->jpeg_len)) {
+        smid_logf("black frame encode failed stream=%d tile=%d\n", t->stream, t->tile);
+        return -1;
+    }
+    return smid_build_frame_packet(cnm, &t->frame[slot], t->stream, t->tile, seq,
+                                   jpeg_out, (uint32_t)t->jpeg_len);
 }
 
 static int video_tile_build_evdi(struct smid_video_tile *t, int slot,
@@ -573,12 +614,15 @@ static void *video_build_worker_main(void *arg) {
         int quality = w->quality;
         int slot = w->slot;
         bool companion = w->companion;
+        bool black = w->black;
         w->has_job = false;
         pthread_mutex_unlock(&w->lock);
 
-        int rc = companion ?
-                video_tile_build_evdi_companion(tile, slot, evdi, &w->cnm, seq, quality) :
-                video_tile_build_evdi(tile, slot, evdi, &w->cnm, seq, quality);
+        int rc = black ?
+                video_tile_build_black(tile, slot, &w->cnm, seq, quality) :
+                (companion ?
+                 video_tile_build_evdi_companion(tile, slot, evdi, &w->cnm, seq, quality) :
+                 video_tile_build_evdi(tile, slot, evdi, &w->cnm, seq, quality));
 
         pthread_mutex_lock(&w->lock);
         w->rc = rc;
@@ -641,13 +685,14 @@ static void video_build_worker_destroy(struct smid_video_build_worker *w) {
 static void video_build_worker_submit(struct smid_video_build_worker *w,
                                       struct smid_evdi_source *evdi,
                                       uint32_t seq, int quality, int slot,
-                                      bool companion) {
+                                      bool companion, bool black) {
     pthread_mutex_lock(&w->lock);
     w->evdi = evdi;
     w->seq = seq;
     w->quality = quality;
     w->slot = slot;
     w->companion = companion;
+    w->black = black;
     w->done = false;
     w->rc = 0;
     w->has_job = true;
@@ -668,6 +713,7 @@ static int video_build_worker_wait(struct smid_video_build_worker *w) {
 static int video_build_send_mask(struct smid_video_build_worker workers[4],
                                  struct smid_evdi_source *evdi,
                                  uint8_t send_mask, uint8_t companion_mask,
+                                 uint8_t black_mask,
                                  const uint32_t seq[2],
                                  int quality, int slot,
                                  uint64_t *build_wall_us) {
@@ -677,9 +723,11 @@ static int video_build_send_mask(struct smid_video_build_worker workers[4],
     for (int i = 0; i < 4; i++) {
         uint8_t bit = (uint8_t)(1u << i);
         if (send_mask & bit) {
+            bool black = (black_mask & bit) != 0;
             video_build_worker_submit(&workers[i], evdi, seq[workers[i].tile->stream],
                                       quality, slot,
-                                      (companion_mask & bit) != 0);
+                                      !black && (companion_mask & bit) != 0,
+                                      black);
         }
     }
     for (int i = 0; i < 4; i++) {
@@ -1090,6 +1138,7 @@ int main(int argc, char **argv) {
             uint64_t stats_start_us = start_us;
             uint64_t end_us = seconds > 0 ? start_us + (uint64_t)seconds * 1000000u : 0;
             uint8_t dirty = evdi_streams > 1 ? 0xfu : 0x3u;
+            uint8_t blank = 0;
             uint8_t live_send_mask = evdi_streams > 1 ? 0xfu : 0x3u;
             uint64_t stat_frames = 0;
             uint64_t stat_stream_frames[2] = {0, 0};
@@ -1128,7 +1177,8 @@ int main(int argc, char **argv) {
                         jpeg_target_mib_s, ack_window, retained_frames ? "on" : "off");
             }
             while (!rc && !stop_requested && (!end_us || smid_mono_us() < end_us)) {
-                dirty |= smid_evdi_source_consume_dirty(evdi);
+                blank |= smid_evdi_source_consume_blank(evdi) & live_send_mask;
+                dirty |= smid_evdi_source_consume_dirty(evdi) | blank;
                 uint64_t now_us = smid_mono_us();
                 if (!dirty && now_us - last_quality_frame_us >= SMID_JPEG_QUALITY_IDLE_RESET_US) {
                     quality_controller_note_idle(&quality_ctl);
@@ -1196,14 +1246,18 @@ int main(int argc, char **argv) {
                 }
 
                 if (video_jit_wait_before_build(tiles, &inflight, &timing)) {
+                    blank |= smid_evdi_source_consume_blank(evdi) & live_send_mask;
                     dirty |= smid_evdi_source_consume_dirty(evdi);
+                    dirty |= blank;
                 }
 
                 uint64_t frame_start_us = smid_mono_us();
                 int frame_quality = quality_controller_current(&quality_ctl);
                 struct smid_video_send_plan plan;
                 rc = video_make_send_plan(evdi, dirty, live_send_mask, retained, retained_frames, &plan);
+                video_plan_apply_blank(&plan, blank);
                 uint8_t send_mask = plan.send_mask;
+                uint8_t black_mask = (uint8_t)(send_mask & blank);
                 int build_slot = pipe_slot;
                 int submitted[4];
                 int submitted_n = 0;
@@ -1214,6 +1268,7 @@ int main(int argc, char **argv) {
                 uint64_t build_wall_us = 0;
                 if (!rc) {
                     rc = video_build_send_mask(workers, evdi, send_mask, plan.companion_mask,
+                                               black_mask,
                                                seq, frame_quality, build_slot,
                                                &build_wall_us);
                 }
@@ -1269,16 +1324,21 @@ int main(int argc, char **argv) {
                 }
                 if (!rc && (ack_uncertain ||
                             late_wait_us >= SMID_VIDEO_LATE_REBUILD_WAIT_US)) {
+                    blank |= smid_evdi_source_consume_blank(evdi) & live_send_mask;
                     uint8_t late_dirty = smid_evdi_source_consume_dirty(evdi) & live_send_mask;
                     if (late_dirty || ack_uncertain) {
                         dirty |= late_dirty;
+                        dirty |= blank;
                         rc = video_make_send_plan(evdi, dirty, live_send_mask,
                                                   retained, retained_frames, &plan);
+                        video_plan_apply_blank(&plan, blank);
                         send_mask = plan.send_mask;
+                        black_mask = (uint8_t)(send_mask & blank);
                         frame_start_us = smid_mono_us();
                         if (!rc) {
                             rc = video_build_send_mask(workers, evdi, send_mask,
-                                                       plan.companion_mask, seq,
+                                                       plan.companion_mask,
+                                                       black_mask, seq,
                                                        frame_quality, build_slot,
                                                        &build_wall_us);
                         }
@@ -1307,7 +1367,10 @@ int main(int argc, char **argv) {
                     }
                 }
                 if (submitted_n > 0) {
-                    if (!rc && !ack_uncertain) {
+                    if (!rc && black_mask) {
+                        video_retained_reset_all(retained);
+                        blank &= (uint8_t)~black_mask;
+                    } else if (!rc && !ack_uncertain) {
                         video_retained_note_plan(retained, &plan);
                     } else if (!rc) {
                         video_retained_reset_all(retained);
